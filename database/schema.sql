@@ -24,12 +24,13 @@ CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) DEFAULT '',  -- Opcional: solo para login legacy, OTP no lo usa
     full_name VARCHAR(100),
     avatar_url VARCHAR(500),
     total_points INTEGER DEFAULT 0,
     level VARCHAR(50) DEFAULT 'Local',
     ranking_position INTEGER,
+    shopify_customer_id VARCHAR(100),  -- ID del customer en Shopify
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
