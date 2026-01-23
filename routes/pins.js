@@ -17,7 +17,8 @@ router.get('/', optionalAuth, async (req, res) => {
             user_id,
             limit = 50,
             offset = 0,
-            featured
+            featured,
+            with_tresesenta
         } = req.query;
 
         let queryText = `
@@ -26,14 +27,15 @@ router.get('/', optionalAuth, async (req, res) => {
                 p.latitude, p.longitude, p.image_urls, p.video_url,
                 p.likes_count, p.comments_count, p.shares_count,
                 p.is_featured, p.created_at,
-                u.id as user_id, u.username, u.avatar_url,
+                p.used_tresesenta, p.verification_status,
+                u.id as user_id, u.username, u.avatar_url, u.is_verified_buyer,
                 c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
                 ci.name as city_name
             FROM pins p
             LEFT JOIN users u ON p.user_id = u.id
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN cities ci ON p.city_id = ci.id
-            WHERE 1=1
+            WHERE p.is_hidden = false
         `;
 
         const params = [];
@@ -59,6 +61,10 @@ router.get('/', optionalAuth, async (req, res) => {
 
         if (featured === 'true') {
             queryText += ` AND p.is_featured = true`;
+        }
+
+        if (with_tresesenta === 'true') {
+            queryText += ` AND p.used_tresesenta = true AND p.verification_status = 'approved'`;
         }
 
         queryText += ` ORDER BY p.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
@@ -107,14 +113,14 @@ router.get('/:id', optionalAuth, async (req, res) => {
         const result = await query(
             `SELECT
                 p.*,
-                u.id as user_id, u.username, u.avatar_url, u.level,
+                u.id as user_id, u.username, u.avatar_url, u.level, u.is_verified_buyer, u.profile_color,
                 c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
                 ci.name as city_name, ci.region as city_region
             FROM pins p
             LEFT JOIN users u ON p.user_id = u.id
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN cities ci ON p.city_id = ci.id
-            WHERE p.id = $1`,
+            WHERE p.id = $1 AND p.is_hidden = false`,
             [id]
         );
 
@@ -131,6 +137,16 @@ router.get('/:id', optionalAuth, async (req, res) => {
                 [req.user.id, id]
             );
             pin.liked_by_user = likeCheck.rows.length > 0;
+
+            // Si es su propio pin, incluir info de verificación pendiente
+            if (req.user.id === pin.user_id && pin.verification_status === 'pending') {
+                const verificationRequest = await query(
+                    `SELECT id, status, created_at FROM verification_requests
+                     WHERE pin_id = $1 AND user_id = $2`,
+                    [id, req.user.id]
+                );
+                pin.verification_request = verificationRequest.rows[0] || null;
+            }
         }
 
         res.json({ pin });
@@ -143,7 +159,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
 // ====================================
 // POST /api/pins
-// Crear un nuevo pin
+// Crear un nuevo pin (con soporte para verificación TRESESENTA)
 // ====================================
 router.post('/',
     authenticateToken,
@@ -156,7 +172,8 @@ router.post('/',
         body('location_name').optional().trim(),
         body('city_id').optional().isInt(),
         body('shoe_model').optional().trim(),
-        body('image_urls').optional().isArray()
+        body('image_urls').optional().isArray(),
+        body('used_tresesenta').optional().isBoolean()
     ],
     async (req, res) => {
         try {
@@ -175,11 +192,67 @@ router.post('/',
                 city_id,
                 shoe_model,
                 image_urls,
-                video_url
+                video_url,
+                used_tresesenta = false
             } = req.body;
 
             const user_id = req.user.id;
-            const points_awarded = 20; // Puntos por crear pin
+
+            // Verificar límite diario
+            const limitCheck = await query(
+                `SELECT check_daily_limit($1, 'pin') as allowed`,
+                [user_id]
+            );
+
+            if (!limitCheck.rows[0]?.allowed) {
+                return res.status(429).json({
+                    error: 'Has alcanzado el límite diario de pins. Intenta mañana.'
+                });
+            }
+
+            // Determinar acción de puntos según contenido
+            let action_code = 'create_pin';
+            if (image_urls && image_urls.length > 0) {
+                action_code = 'create_pin_with_photo';
+            }
+            if (video_url) {
+                action_code = 'create_pin_with_video';
+            }
+
+            // Obtener puntos de la acción configurada
+            const actionResult = await query(
+                `SELECT * FROM point_actions WHERE action_code = $1 AND is_active = true`,
+                [action_code]
+            );
+            const action = actionResult.rows[0];
+            let base_points = action?.points || 20;
+            let tresesenta_bonus = action?.tresesenta_bonus || 0;
+
+            // Determinar estado de verificación
+            let verification_status = 'none';
+            if (used_tresesenta) {
+                // Verificar si el usuario es comprador verificado (auto-aprobar)
+                const userCheck = await query(
+                    `SELECT is_verified_buyer FROM users WHERE id = $1`,
+                    [user_id]
+                );
+                const autoApprove = await query(
+                    `SELECT setting_value->>'value' as value FROM admin_settings
+                     WHERE setting_key = 'auto_approve_verified_buyers'`
+                );
+
+                if (userCheck.rows[0]?.is_verified_buyer && autoApprove.rows[0]?.value === 'true') {
+                    verification_status = 'approved';
+                } else {
+                    verification_status = 'pending';
+                }
+            }
+
+            // Calcular puntos totales
+            let points_awarded = base_points;
+            if (used_tresesenta && verification_status === 'approved') {
+                points_awarded += tresesenta_bonus;
+            }
 
             // Usar transacción para crear el pin y actualizar puntos
             const result = await transaction(async (client) => {
@@ -187,18 +260,28 @@ router.post('/',
                 const pinResult = await client.query(
                     `INSERT INTO pins
                     (user_id, category_id, title, description, location_name, latitude, longitude,
-                     city_id, shoe_model, image_urls, video_url, points_awarded)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                     city_id, shoe_model, image_urls, video_url, points_awarded,
+                     used_tresesenta, verification_status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                     RETURNING *`,
                     [user_id, category_id, title, description, location_name || null,
                         latitude, longitude, city_id || null, shoe_model || null,
-                        image_urls || [], video_url || null, points_awarded]
+                        image_urls || [], video_url || null, points_awarded,
+                        used_tresesenta, verification_status]
                 );
 
-                // Actualizar puntos del usuario
+                const pin = pinResult.rows[0];
+
+                // Registrar transacción de puntos
                 await client.query(
-                    'UPDATE users SET total_points = total_points + $1 WHERE id = $2',
-                    [points_awarded, user_id]
+                    `SELECT record_point_transaction($1, $2, $3, NULL, $4, $5)`,
+                    [user_id, action_code, pin.id, used_tresesenta && verification_status === 'approved', `Pin creado: ${title}`]
+                );
+
+                // Incrementar estadísticas diarias
+                await client.query(
+                    `SELECT increment_daily_stat($1, 'pin')`,
+                    [user_id]
                 );
 
                 // Si tiene city_id, actualizar user_cities
@@ -215,13 +298,30 @@ router.post('/',
                     );
                 }
 
-                return pinResult.rows[0];
+                // Si marcó used_tresesenta y está pendiente, crear solicitud de verificación
+                if (used_tresesenta && verification_status === 'pending') {
+                    await client.query(
+                        `INSERT INTO verification_requests (pin_id, user_id, bonus_points)
+                         VALUES ($1, $2, $3)`,
+                        [pin.id, user_id, tresesenta_bonus]
+                    );
+                }
+
+                return pin;
             });
 
+            let message = `¡Pin creado! Has ganado ${points_awarded} puntos`;
+            if (used_tresesenta && verification_status === 'pending') {
+                message += '. Tu verificación TRESESENTA está pendiente de aprobación.';
+            } else if (used_tresesenta && verification_status === 'approved') {
+                message += ` (incluye +${tresesenta_bonus} bonus TRESESENTA)`;
+            }
+
             res.status(201).json({
-                message: `¡Pin creado! Has ganado ${points_awarded} puntos 🎉`,
+                message,
                 pin: result,
-                points_earned: points_awarded
+                points_earned: points_awarded,
+                verification_status
             });
 
         } catch (error) {
@@ -240,6 +340,18 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
         const { id } = req.params;
         const user_id = req.user.id;
 
+        // Verificar límite diario
+        const limitCheck = await query(
+            `SELECT check_daily_limit($1, 'like') as allowed`,
+            [user_id]
+        );
+
+        if (!limitCheck.rows[0]?.allowed) {
+            return res.status(429).json({
+                error: 'Has alcanzado el límite diario de likes. Intenta mañana.'
+            });
+        }
+
         // Verificar si ya existe el like
         const existing = await query(
             'SELECT id FROM likes WHERE user_id = $1 AND pin_id = $2',
@@ -250,21 +362,41 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
             return res.status(409).json({ error: 'Ya has dado like a este pin' });
         }
 
-        // Crear like (el trigger se encarga de incrementar el contador)
+        // Obtener dueño del pin para dar puntos
+        const pinOwner = await query(
+            'SELECT user_id FROM pins WHERE id = $1',
+            [id]
+        );
+
+        // Crear like y registrar puntos
         await transaction(async (client) => {
             await client.query(
                 'INSERT INTO likes (user_id, pin_id) VALUES ($1, $2)',
                 [user_id, id]
             );
 
-            // Dar 5 puntos al usuario que da like
+            // Puntos para quien da like
             await client.query(
-                'UPDATE users SET total_points = total_points + 5 WHERE id = $1',
+                `SELECT record_point_transaction($1, 'like_pin', $2, NULL, false, 'Diste like')`,
+                [user_id, id]
+            );
+
+            // Puntos para quien recibe like (si no es el mismo usuario)
+            if (pinOwner.rows[0] && pinOwner.rows[0].user_id !== user_id) {
+                await client.query(
+                    `SELECT record_point_transaction($1, 'receive_like', $2, $3, false, 'Recibiste un like')`,
+                    [pinOwner.rows[0].user_id, id, user_id]
+                );
+            }
+
+            // Incrementar estadísticas diarias
+            await client.query(
+                `SELECT increment_daily_stat($1, 'like')`,
                 [user_id]
             );
         });
 
-        res.json({ message: '¡+5 puntos! 💖', points_earned: 5 });
+        res.json({ message: '¡Like registrado!', liked: true });
 
     } catch (error) {
         console.error('Error al dar like:', error);
@@ -343,16 +475,82 @@ router.post('/:id/comments',
             const { content } = req.body;
             const user_id = req.user.id;
 
-            const result = await query(
-                `INSERT INTO comments (user_id, pin_id, content)
-                 VALUES ($1, $2, $3)
-                 RETURNING *`,
-                [user_id, id, content]
+            // Verificar límite diario
+            const limitCheck = await query(
+                `SELECT check_daily_limit($1, 'comment') as allowed`,
+                [user_id]
             );
+
+            if (!limitCheck.rows[0]?.allowed) {
+                return res.status(429).json({
+                    error: 'Has alcanzado el límite diario de comentarios. Intenta mañana.'
+                });
+            }
+
+            // Verificar cooldown
+            const cooldownCheck = await query(
+                `SELECT last_comment_at FROM user_daily_stats
+                 WHERE user_id = $1 AND stat_date = CURRENT_DATE`,
+                [user_id]
+            );
+
+            if (cooldownCheck.rows[0]?.last_comment_at) {
+                const cooldownSetting = await query(
+                    `SELECT (setting_value->>'value')::INTEGER as seconds
+                     FROM admin_settings WHERE setting_key = 'comment_cooldown_seconds'`
+                );
+                const cooldownSeconds = cooldownSetting.rows[0]?.seconds || 30;
+                const lastComment = new Date(cooldownCheck.rows[0].last_comment_at);
+                const secondsAgo = (Date.now() - lastComment.getTime()) / 1000;
+
+                if (secondsAgo < cooldownSeconds) {
+                    return res.status(429).json({
+                        error: `Espera ${Math.ceil(cooldownSeconds - secondsAgo)} segundos antes de comentar de nuevo.`
+                    });
+                }
+            }
+
+            // Obtener dueño del pin
+            const pinOwner = await query(
+                'SELECT user_id FROM pins WHERE id = $1',
+                [id]
+            );
+
+            const result = await transaction(async (client) => {
+                // Crear comentario
+                const commentResult = await client.query(
+                    `INSERT INTO comments (user_id, pin_id, content)
+                     VALUES ($1, $2, $3)
+                     RETURNING *`,
+                    [user_id, id, content]
+                );
+
+                // Puntos para quien comenta
+                await client.query(
+                    `SELECT record_point_transaction($1, 'comment_pin', $2, NULL, false, 'Comentaste en un pin')`,
+                    [user_id, id]
+                );
+
+                // Puntos para quien recibe comentario (si no es el mismo usuario)
+                if (pinOwner.rows[0] && pinOwner.rows[0].user_id !== user_id) {
+                    await client.query(
+                        `SELECT record_point_transaction($1, 'receive_comment', $2, $3, false, 'Recibiste un comentario')`,
+                        [pinOwner.rows[0].user_id, id, user_id]
+                    );
+                }
+
+                // Incrementar estadísticas diarias
+                await client.query(
+                    `SELECT increment_daily_stat($1, 'comment')`,
+                    [user_id]
+                );
+
+                return commentResult.rows[0];
+            });
 
             res.status(201).json({
                 message: 'Comentario creado',
-                comment: result.rows[0]
+                comment: result
             });
 
         } catch (error) {

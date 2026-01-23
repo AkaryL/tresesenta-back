@@ -62,6 +62,10 @@ app.use('/api/cities', require('./routes/cities'));
 app.use('/api/badges', require('./routes/badges'));
 app.use('/api/routes', require('./routes/routes'));
 app.use('/api/upload', require('./routes/upload'));
+// Nuevas rutas para sistema de puntos, verificación y admin
+app.use('/api/points', require('./routes/points'));
+app.use('/api/verification', require('./routes/verification'));
+app.use('/api/admin', require('./routes/admin'));
 
 // 404 handler
 app.use((req, res) => {
