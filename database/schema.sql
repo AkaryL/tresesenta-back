@@ -74,10 +74,10 @@ CREATE TABLE categories (
 -- Insertar categorías predefinidas (según diseño Mapa 360)
 INSERT INTO categories (name, name_es, emoji, color, description) VALUES
 ('parques', 'Parques', '🌳', '#7ed957', 'Parques, jardines y espacios verdes'),
-('restaurante', 'Restaurante', '🍽️', '#9b59b6', 'Restaurantes y lugares para comer'),
-('vida_nocturna', 'Vida Nocturna', '🍸', '#85c1e9', 'Bares, antros y vida nocturna'),
 ('cafeteria', 'Cafetería', '☕', '#f5a623', 'Cafeterías y lugares para café'),
-('cultura', 'Cultura', '🎨', '#e84393', 'Museos, galerías y cultura'),
+('restaurantes', 'Restaurantes', '🍽️', '#9b59b6', 'Restaurantes y lugares para comer'),
+('vida_nocturna', 'Vida Nocturna', '🍸', '#3498db', 'Bares, antros y vida nocturna'),
+('lugares_publicos', 'Lugares Públicos', '🏛️', '#85c1e9', 'Plazas, monumentos y espacios públicos'),
 ('favoritos', 'Favoritos', '⭐', '#f1c40f', 'Lugares favoritos de la comunidad');
 
 -- ====================================
