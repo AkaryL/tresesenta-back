@@ -271,7 +271,8 @@ router.post('/verify-code',
                     full_name: user.full_name || `${customer.first_name} ${customer.last_name}`.trim(),
                     total_points: user.total_points || 0,
                     level: user.level || 1,
-                    shopify_customer_id: user.shopify_customer_id
+                    shopify_customer_id: user.shopify_customer_id,
+                    is_admin: user.is_admin || false
                 }
             });
 
@@ -296,7 +297,7 @@ router.get('/me', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         const result = await query(
-            `SELECT id, username, email, full_name, total_points, level, avatar_url, ranking_position, shopify_customer_id, created_at
+            `SELECT id, username, email, full_name, total_points, level, avatar_url, ranking_position, shopify_customer_id, is_admin, created_at
              FROM users WHERE id = $1`,
             [decoded.id]
         );
@@ -344,14 +345,25 @@ router.get('/my-orders', async (req, res) => {
         const { shopify_customer_id } = userResult.rows[0];
 
         if (!shopify_customer_id) {
-            return res.json({ orders: [], message: 'No tienes cuenta vinculada a Tresesenta' });
+            return res.json({ orders: [], stats: null, message: 'No tienes cuenta vinculada a Tresesenta' });
         }
 
-        const orders = await shopify.getCustomerOrders(shopify_customer_id);
+        const [orders, customer] = await Promise.all([
+            shopify.getCustomerOrders(shopify_customer_id),
+            shopify.getCustomerById(shopify_customer_id)
+        ]);
+
+        const stats = customer ? {
+            orders_count: customer.orders_count || 0,
+            total_spent: customer.total_spent || '0.00',
+            currency: customer.currency || 'MXN',
+            member_since: customer.created_at
+        } : null;
 
         res.json({
             customer_id: shopify_customer_id,
             total_orders: orders.length,
+            stats,
             orders
         });
 
@@ -448,7 +460,7 @@ router.post('/login',
             const { email, password } = req.body;
 
             const result = await query(
-                'SELECT id, username, email, password_hash, full_name, total_points, level, avatar_url, shopify_customer_id FROM users WHERE email = $1',
+                'SELECT id, username, email, password_hash, full_name, total_points, level, avatar_url, shopify_customer_id, is_admin FROM users WHERE email = $1',
                 [email]
             );
 

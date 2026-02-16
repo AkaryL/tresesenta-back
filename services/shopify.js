@@ -88,6 +88,19 @@ async function createCustomer(customerData) {
 }
 
 /**
+ * Obtener customer por ID (stats: orders_count, total_spent, created_at)
+ */
+async function getCustomerById(customerId) {
+  try {
+    const data = await shopifyRequest(`/customers/${customerId}.json`);
+    return data.customer;
+  } catch (error) {
+    console.error(`[SHOPIFY] Error obteniendo customer ${customerId}:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Obtener detalles de un producto por ID
  */
 async function getProductById(productId) {
@@ -183,6 +196,7 @@ const { sendOTPEmail, sendWelcomeEmail } = require('./email');
 module.exports = {
   findCustomerByEmail,
   createCustomer,
+  getCustomerById,
   getCustomerOrders,
   sendOTPEmail,
   sendWelcomeEmail

@@ -1,13 +1,39 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 const { testConnection } = require('./config/db');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// Socket.IO
+const io = new Server(server, {
+    cors: {
+        origin: process.env.CORS_ORIGIN || '*',
+        methods: ['GET', 'POST'],
+        credentials: true,
+    },
+});
+
+// Make io accessible to routes via app.locals
+app.locals.io = io;
+
+io.on('connection', (socket) => {
+    // Join a pin room to receive comment updates
+    socket.on('join-pin', (pinId) => {
+        socket.join(`pin-${pinId}`);
+    });
+
+    socket.on('leave-pin', (pinId) => {
+        socket.leave(`pin-${pinId}`);
+    });
+});
 
 // ====================================
 // MIDDLEWARES
@@ -29,7 +55,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Rate limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // límite de 100 requests por IP
+    max: 500, // límite de 500 requests por IP
     message: 'Demasiadas peticiones desde esta IP, intenta de nuevo más tarde.'
 });
 app.use('/api/', limiter);
@@ -97,7 +123,7 @@ const startServer = async () => {
         }
 
         // Start listening
-        app.listen(PORT, () => {
+        server.listen(PORT, () => {
             console.log('\n🚀 ================================');
             console.log(`🚀 TRESESENTA MAPA360 API`);
             console.log(`🚀 Server running on port ${PORT}`);

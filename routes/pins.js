@@ -84,7 +84,7 @@ router.get('/', optionalAuth, async (req, res) => {
 
                 result.rows = result.rows.map(pin => ({
                     ...pin,
-                    liked_by_user: likedPinIds.has(pin.id)
+                    user_has_liked: likedPinIds.has(pin.id)
                 }));
             }
         }
@@ -136,7 +136,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
                 'SELECT id FROM likes WHERE user_id = $1 AND pin_id = $2',
                 [req.user.id, id]
             );
-            pin.liked_by_user = likeCheck.rows.length > 0;
+            pin.user_has_liked = likeCheck.rows.length > 0;
 
             // Si es su propio pin, incluir info de verificación pendiente
             if (req.user.id === pin.user_id && pin.verification_status === 'pending') {
@@ -375,6 +375,12 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
                 [user_id, id]
             );
 
+            // Incrementar likes_count en el pin
+            await client.query(
+                'UPDATE pins SET likes_count = COALESCE(likes_count, 0) + 1 WHERE id = $1',
+                [id]
+            );
+
             // Puntos para quien da like
             await client.query(
                 `SELECT record_point_transaction($1, 'like_pin', $2, NULL, false, 'Diste like')`,
@@ -395,6 +401,16 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
                 [user_id]
             );
         });
+
+        // Emit via WebSocket
+        const io = req.app.locals.io;
+        if (io) {
+            io.to(`pin-${id}`).emit('pin-liked', {
+                pin_id: parseInt(id),
+                user_id,
+                liked: true,
+            });
+        }
 
         res.json({ message: '¡Like registrado!', liked: true });
 
@@ -422,6 +438,22 @@ router.delete('/:id/like', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'No has dado like a este pin' });
         }
 
+        // Decrementar likes_count en el pin
+        await query(
+            'UPDATE pins SET likes_count = GREATEST(COALESCE(likes_count, 0) - 1, 0) WHERE id = $1',
+            [id]
+        );
+
+        // Emit via WebSocket
+        const io = req.app.locals.io;
+        if (io) {
+            io.to(`pin-${id}`).emit('pin-liked', {
+                pin_id: parseInt(id),
+                user_id,
+                liked: false,
+            });
+        }
+
         res.json({ message: 'Like eliminado' });
 
     } catch (error) {
@@ -441,9 +473,9 @@ router.get('/:id/comments', async (req, res) => {
         const result = await query(
             `SELECT c.*, u.username, u.avatar_url
              FROM comments c
-             JOIN users u ON c.user_id = u.id
+             LEFT JOIN users u ON c.user_id = u.id
              WHERE c.pin_id = $1
-             ORDER BY c.created_at DESC`,
+             ORDER BY c.created_at ASC`,
             [id]
         );
 
@@ -547,6 +579,19 @@ router.post('/:id/comments',
 
                 return commentResult.rows[0];
             });
+
+            // Emit via WebSocket to pin room
+            const io = req.app.locals.io;
+            if (io) {
+                io.to(`pin-${id}`).emit('new-comment', {
+                    pin_id: parseInt(id),
+                    comment: {
+                        ...result,
+                        username: req.user.username,
+                        user: { username: req.user.username },
+                    },
+                });
+            }
 
             res.status(201).json({
                 message: 'Comentario creado',
