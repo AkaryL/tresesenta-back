@@ -12,9 +12,9 @@ const pool = new Pool({
         rejectUnauthorized: false // Necesario para DigitalOcean
     } : false,
     // Configuración de pool
-    max: 20, // máximo número de clientes en el pool
+    max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,
 });
 
 // Event listeners para debugging
