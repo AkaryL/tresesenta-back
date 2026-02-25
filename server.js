@@ -12,10 +12,15 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
+// CORS origins (supports comma-separated list in env var)
+const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+    : ['https://tresesenta-front.vercel.app', 'http://localhost:5173'];
+
 // Socket.IO
 const io = new Server(server, {
     cors: {
-        origin: process.env.CORS_ORIGIN || '*',
+        origin: allowedOrigins,
         methods: ['GET', 'POST'],
         credentials: true,
     },
@@ -44,7 +49,7 @@ app.use(helmet());
 
 // CORS
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: allowedOrigins,
     credentials: true
 }));
 
