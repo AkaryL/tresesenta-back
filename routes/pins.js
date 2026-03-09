@@ -36,6 +36,7 @@ router.get('/', optionalAuth, async (req, res) => {
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN cities ci ON p.city_id = ci.id
             WHERE p.is_hidden = false
+              AND (p.verification_status = 'approved' OR p.verification_status = 'none')
         `;
 
         const params = [];
@@ -120,7 +121,9 @@ router.get('/:id', optionalAuth, async (req, res) => {
             LEFT JOIN users u ON p.user_id = u.id
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN cities ci ON p.city_id = ci.id
-            WHERE p.id = $1 AND p.is_hidden = false`,
+            WHERE p.id = $1
+              AND p.is_hidden = false
+              AND (p.verification_status = 'approved' OR p.verification_status = 'none')`,
             [id]
         );
 
@@ -226,12 +229,17 @@ router.post('/',
             );
             const action = actionResult.rows[0];
             let base_points = action?.points || 20;
-            let tresesenta_bonus = action?.tresesenta_bonus || 0;
+            let tresesenta_bonus = used_tresesenta ? (action?.tresesenta_bonus || 0) : 0;
 
-            // Determinar estado de verificación
-            let verification_status = 'none';
+            // Puntos totales a otorgar al aprobar
+            let points_on_approval = base_points + tresesenta_bonus;
+
+            // Todos los pines pasan por revisión (pending por defecto)
+            let verification_status = 'pending';
+            let points_awarded_now = 0;
+
+            // Excepción: compradores verificados con tresesenta se auto-aprueban
             if (used_tresesenta) {
-                // Verificar si el usuario es comprador verificado (auto-aprobar)
                 const userCheck = await query(
                     `SELECT is_verified_buyer FROM users WHERE id = $1`,
                     [user_id]
@@ -240,21 +248,13 @@ router.post('/',
                     `SELECT setting_value->>'value' as value FROM admin_settings
                      WHERE setting_key = 'auto_approve_verified_buyers'`
                 );
-
                 if (userCheck.rows[0]?.is_verified_buyer && autoApprove.rows[0]?.value === 'true') {
                     verification_status = 'approved';
-                } else {
-                    verification_status = 'pending';
+                    points_awarded_now = points_on_approval;
                 }
             }
 
-            // Calcular puntos totales
-            let points_awarded = base_points;
-            if (used_tresesenta && verification_status === 'approved') {
-                points_awarded += tresesenta_bonus;
-            }
-
-            // Usar transacción para crear el pin y actualizar puntos
+            // Usar transacción para crear el pin
             const result = await transaction(async (client) => {
                 // Crear pin
                 const pinResult = await client.query(
@@ -266,19 +266,21 @@ router.post('/',
                     RETURNING *`,
                     [user_id, category_id, title, description, location_name || null,
                         latitude, longitude, city_id || null, shoe_model || null,
-                        image_urls || [], video_url || null, points_awarded,
+                        image_urls || [], video_url || null, points_awarded_now,
                         used_tresesenta, verification_status]
                 );
 
                 const pin = pinResult.rows[0];
 
-                // Registrar transacción de puntos
-                await client.query(
-                    `SELECT record_point_transaction($1, $2, $3, NULL, $4, $5)`,
-                    [user_id, action_code, pin.id, used_tresesenta && verification_status === 'approved', `Pin creado: ${title}`]
-                );
+                // Solo registrar puntos si fue auto-aprobado
+                if (verification_status === 'approved') {
+                    await client.query(
+                        `SELECT record_point_transaction($1, $2, $3, NULL, $4, $5)`,
+                        [user_id, action_code, pin.id, true, `Pin creado: ${title}`]
+                    );
+                }
 
-                // Incrementar estadísticas diarias
+                // Incrementar estadísticas diarias siempre
                 await client.query(
                     `SELECT increment_daily_stat($1, 'pin')`,
                     [user_id]
@@ -294,33 +296,36 @@ router.post('/',
                             pins_count = user_cities.pins_count + 1,
                             points_earned = user_cities.points_earned + $3,
                             last_visit = CURRENT_TIMESTAMP`,
-                        [user_id, city_id, points_awarded]
+                        [user_id, city_id, points_awarded_now]
                     );
                 }
 
-                // Si marcó used_tresesenta y está pendiente, crear solicitud de verificación
-                if (used_tresesenta && verification_status === 'pending') {
+                // Crear solicitud de verificación para todos los pines pendientes
+                if (verification_status === 'pending') {
                     await client.query(
                         `INSERT INTO verification_requests (pin_id, user_id, bonus_points)
                          VALUES ($1, $2, $3)`,
-                        [pin.id, user_id, tresesenta_bonus]
+                        [pin.id, user_id, points_on_approval]
                     );
                 }
 
                 return pin;
             });
 
-            let message = `¡Pin creado! Has ganado ${points_awarded} puntos`;
-            if (used_tresesenta && verification_status === 'pending') {
-                message += '. Tu verificación TRESESENTA está pendiente de aprobación.';
-            } else if (used_tresesenta && verification_status === 'approved') {
-                message += ` (incluye +${tresesenta_bonus} bonus TRESESENTA)`;
+            let message;
+            if (verification_status === 'approved') {
+                message = `¡Pin creado! Has ganado ${points_awarded_now} puntos (auto-aprobado)`;
+            } else {
+                message = 'Tu pin fue enviado para revisión. Ganarás puntos cuando un administrador lo apruebe.';
+                if (used_tresesenta) {
+                    message += ` (+${points_on_approval} pts incluyen bonus TRESESENTA)`;
+                }
             }
 
             res.status(201).json({
                 message,
                 pin: result,
-                points_earned: points_awarded,
+                points_earned: points_awarded_now,
                 verification_status
             });
 

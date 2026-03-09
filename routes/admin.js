@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { query, transaction } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
+const { sendVerificationRejectedEmail } = require('../services/email');
 
 const router = express.Router();
 
@@ -569,6 +570,9 @@ router.post('/pins/:id/hide',
                 );
             });
 
+            // WebSocket
+            req.app.locals.io?.emit('pin:removed', { pin_id: parseInt(id) });
+
             res.json({ message: 'Pin ocultado' });
 
         } catch (error) {
@@ -599,6 +603,9 @@ router.post('/pins/:id/unhide', authenticateToken, requireAdmin, async (req, res
                 [admin_id, id]
             );
         });
+
+        // WebSocket: el pin vuelve al mapa
+        req.app.locals.io?.emit('pin:added', { pin_id: parseInt(id) });
 
         res.json({ message: 'Pin restaurado' });
 
@@ -687,5 +694,194 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
         res.status(500).json({ error: 'Error al obtener estadísticas' });
     }
 });
+
+// ====================================
+// GET /api/admin/historial
+// Historial de verificaciones con backfill automático
+// ====================================
+router.get('/historial', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const admin_id = req.user.id;
+
+        // Obtener username del admin para el backfill
+        const adminUser = await query('SELECT username FROM users WHERE id = $1', [admin_id]);
+        const adminUsername = adminUser.rows[0]?.username || 'admin';
+
+        // Traer TODOS los pins visibles en el mapa (mismo filtro que GET /api/pins)
+        // + su verification_request más reciente si existe
+        const pinsResult = await query(`
+            SELECT
+                p.id          AS pin_id,
+                p.title       AS pin_title,
+                p.description AS pin_description,
+                p.location_name,
+                p.latitude,
+                p.longitude,
+                p.image_urls  AS pin_images,
+                p.shoe_model,
+                p.used_tresesenta,
+                p.points_awarded,
+                CASE WHEN p.verification_status = 'none' THEN 'approved' ELSE p.verification_status END AS status,
+                p.created_at  AS pin_created_at,
+                p.user_id,
+                c.name_es     AS category_name,
+                c.emoji       AS category_emoji,
+                ci.name       AS city_name,
+                u.username,
+                u.avatar_url,
+                u.email       AS user_email,
+                vr.id         AS verif_id,
+                vr.reviewed_at,
+                vr.review_notes,
+                vr.rejection_reason,
+                vr.verification_images,
+                vr.reviewed_by,
+                reviewer.username AS reviewer_username
+            FROM pins p
+            JOIN users u ON p.user_id = u.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN cities ci ON p.city_id = ci.id
+            LEFT JOIN verification_requests vr
+                ON vr.pin_id = p.id
+                AND vr.id = (
+                    SELECT id FROM verification_requests
+                    WHERE pin_id = p.id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+            LEFT JOIN users reviewer ON vr.reviewed_by = reviewer.id
+            WHERE p.is_hidden = false
+              AND (p.verification_status = 'approved' OR p.verification_status = 'none')
+            ORDER BY COALESCE(vr.reviewed_at, p.created_at) DESC
+        `);
+
+        // Backfill: crear verification_request para pins sin registro
+        const toBackfill = pinsResult.rows.filter(r => !r.verif_id);
+
+        for (const pin of toBackfill) {
+            await query(`
+                INSERT INTO verification_requests
+                    (pin_id, user_id, status, reviewed_by, reviewed_at, review_notes)
+                VALUES ($1, $2, 'approved', $3, NOW(), 'Aprobado (historial)')
+            `, [pin.pin_id, pin.user_id, admin_id]);
+        }
+
+        // Rellenar en memoria los pins que se acaban de backfill-ear
+        const historial = pinsResult.rows.map(r => {
+            if (!r.verif_id) {
+                return {
+                    ...r,
+                    status: 'approved',
+                    reviewer_username: adminUsername,
+                    reviewed_at: new Date().toISOString(),
+                    review_notes: 'Aprobado (historial)',
+                };
+            }
+            return r;
+        });
+
+        res.json({ historial, backfilled: toBackfill.length });
+
+    } catch (error) {
+        console.error('Error al obtener historial:', error);
+        res.status(500).json({ error: 'Error al obtener historial' });
+    }
+});
+
+// ====================================
+// POST /api/admin/historial/:pin_id/reject
+// Rechazar un pin aprobado desde el historial
+// ====================================
+router.post('/historial/:pin_id/reject',
+    authenticateToken,
+    requireAdmin,
+    [body('reason').trim().notEmpty().withMessage('Se requiere una razón')],
+    async (req, res) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ errors: errors.array() });
+            }
+
+            const { pin_id } = req.params;
+            const { reason } = req.body;
+            const admin_id = req.user.id;
+
+            // Obtener pin + dueño
+            const pinResult = await query(`
+                SELECT p.*, u.email as user_email, u.username as user_username
+                FROM pins p
+                JOIN users u ON p.user_id = u.id
+                WHERE p.id = $1
+            `, [pin_id]);
+
+            if (!pinResult.rows.length) {
+                return res.status(404).json({ error: 'Pin no encontrado' });
+            }
+
+            const pin = pinResult.rows[0];
+
+            if (pin.verification_status === 'rejected') {
+                return res.status(400).json({ error: 'Este pin ya está rechazado' });
+            }
+
+            await transaction(async (client) => {
+                // Pins tresesenta: marcar como rejected
+                // Pins regulares: ocultarlos (is_hidden = true)
+                if (pin.used_tresesenta) {
+                    await client.query(
+                        `UPDATE pins SET verification_status = 'rejected', verified_by = $1, verified_at = NOW(), verification_notes = $2 WHERE id = $3`,
+                        [admin_id, reason, pin_id]
+                    );
+                } else {
+                    await client.query(
+                        `UPDATE pins SET is_hidden = true, hidden_reason = $1 WHERE id = $2`,
+                        [reason, pin_id]
+                    );
+                }
+
+                // Actualizar o crear verification_request
+                const vr = await client.query(
+                    `SELECT id FROM verification_requests WHERE pin_id = $1 ORDER BY created_at DESC LIMIT 1`,
+                    [pin_id]
+                );
+
+                if (vr.rows.length > 0) {
+                    await client.query(
+                        `UPDATE verification_requests
+                         SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), rejection_reason = $2
+                         WHERE id = $3`,
+                        [admin_id, reason, vr.rows[0].id]
+                    );
+                } else {
+                    await client.query(
+                        `INSERT INTO verification_requests (pin_id, user_id, status, reviewed_by, reviewed_at, rejection_reason)
+                         VALUES ($1, $2, 'rejected', $3, NOW(), $4)`,
+                        [pin_id, pin.user_id, admin_id, reason]
+                    );
+                }
+
+                // Log de moderación
+                await client.query(
+                    `INSERT INTO moderation_logs (admin_id, action_type, target_type, target_id, reason)
+                     VALUES ($1, 'reject_from_historial', 'pin', $2, $3)`,
+                    [admin_id, pin_id, reason]
+                );
+            });
+
+            // Notificar al creador
+            sendVerificationRejectedEmail(pin.user_email, pin.user_username, pin.title, reason).catch(() => {});
+
+            // WebSocket: el pin sale del mapa
+            req.app.locals.io?.emit('pin:removed', { pin_id: parseInt(pin_id) });
+
+            res.json({ message: 'Pin rechazado y removido del mapa' });
+
+        } catch (error) {
+            console.error('Error al rechazar desde historial:', error);
+            res.status(500).json({ error: 'Error al rechazar' });
+        }
+    }
+);
 
 module.exports = router;

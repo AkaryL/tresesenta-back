@@ -209,7 +209,160 @@ async function sendWelcomeEmail(email, firstName) {
   }
 }
 
+/**
+ * Enviar notificación de verificación aprobada
+ */
+async function sendVerificationApprovedEmail(email, username, pinTitle, bonusPoints) {
+  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
+
+  console.log('\n' + '='.repeat(50));
+  console.log('[EMAIL] VERIFICACIÓN APROBADA');
+  console.log(`Para: ${email} (@${username})`);
+  console.log(`Pin: ${pinTitle} | Puntos bonus: ${bonusPoints}`);
+  console.log('='.repeat(50) + '\n');
+
+  if (EMAIL_MODE === 'console' || !resend) {
+    return { success: true, mode: 'console' };
+  }
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: `✅ Tu pin fue aprobado | TRESESENTA`,
+      html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',sans-serif;background:#f5f0eb;">
+  <table width="100%" cellspacing="0" cellpadding="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellspacing="0" cellpadding="0" style="max-width:480px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#3d2c1f 0%,#c67b5c 100%);padding:40px;text-align:center;">
+            <h1 style="margin:0;color:#fff;font-size:32px;font-weight:800;">TRESESENTA</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px;">
+            <div style="text-align:center;margin-bottom:24px;">
+              <div style="font-size:48px;">✅</div>
+              <h2 style="margin:12px 0 0;color:#2e7d32;font-size:22px;">¡Tu pin fue aprobado!</h2>
+            </div>
+            <p style="color:#6b6b6b;font-size:15px;line-height:1.6;">
+              Hola <strong>@${username}</strong>,<br><br>
+              Tu publicación <strong>"${pinTitle}"</strong> ha sido revisada y aprobada por nuestro equipo.
+            </p>
+            ${bonusPoints > 0 ? `
+            <div style="background:#e8f5e9;border-radius:12px;padding:20px;text-align:center;margin:24px 0;">
+              <p style="margin:0;color:#2e7d32;font-size:13px;text-transform:uppercase;letter-spacing:2px;">Puntos ganados</p>
+              <p style="margin:8px 0 0;color:#1b5e20;font-size:36px;font-weight:800;">+${bonusPoints}</p>
+            </div>
+            ` : ''}
+            <p style="color:#999;font-size:13px;text-align:center;margin-top:24px;">
+              Ya puedes ver tu pin en el mapa con el sello TRESESENTA.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8f5f2;padding:20px;text-align:center;">
+            <p style="margin:0;color:#999;font-size:12px;">© ${new Date().getFullYear()} TRESESENTA</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    });
+    if (error) throw new Error(error.message);
+    console.log(`[EMAIL] ✅ Aprobación enviada a ${email}`);
+    return { success: true, mode: 'resend', id: data.id };
+  } catch (error) {
+    console.error('[EMAIL] Error aprobación:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enviar notificación de verificación rechazada
+ */
+async function sendVerificationRejectedEmail(email, username, pinTitle, reason) {
+  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
+
+  console.log('\n' + '='.repeat(50));
+  console.log('[EMAIL] VERIFICACIÓN RECHAZADA');
+  console.log(`Para: ${email} (@${username})`);
+  console.log(`Pin: ${pinTitle}`);
+  console.log(`Razón: ${reason}`);
+  console.log('='.repeat(50) + '\n');
+
+  if (EMAIL_MODE === 'console' || !resend) {
+    return { success: true, mode: 'console' };
+  }
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject: `Tu pin requiere cambios | TRESESENTA`,
+      html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',sans-serif;background:#f5f0eb;">
+  <table width="100%" cellspacing="0" cellpadding="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellspacing="0" cellpadding="0" style="max-width:480px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#3d2c1f 0%,#c67b5c 100%);padding:40px;text-align:center;">
+            <h1 style="margin:0;color:#fff;font-size:32px;font-weight:800;">TRESESENTA</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px;">
+            <div style="text-align:center;margin-bottom:24px;">
+              <div style="font-size:48px;">❌</div>
+              <h2 style="margin:12px 0 0;color:#c62828;font-size:22px;">Verificación no aprobada</h2>
+            </div>
+            <p style="color:#6b6b6b;font-size:15px;line-height:1.6;">
+              Hola <strong>@${username}</strong>,<br><br>
+              Tu publicación <strong>"${pinTitle}"</strong> no pudo ser verificada en esta ocasión.
+            </p>
+            <div style="background:#ffebee;border-radius:12px;padding:20px;margin:24px 0;">
+              <p style="margin:0 0 8px;color:#c62828;font-size:12px;text-transform:uppercase;letter-spacing:2px;font-weight:700;">Motivo</p>
+              <p style="margin:0;color:#b71c1c;font-size:15px;line-height:1.5;">"${reason}"</p>
+            </div>
+            <p style="color:#6b6b6b;font-size:14px;line-height:1.6;">
+              Si crees que es un error o tienes más información, puedes intentarlo de nuevo con evidencia adicional.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8f5f2;padding:20px;text-align:center;">
+            <p style="margin:0 0 4px;color:#6b6b6b;font-size:13px;">¿Tienes dudas? Escríbenos a</p>
+            <a href="mailto:hola@tresesenta.com" style="color:#c67b5c;font-size:13px;text-decoration:none;">hola@tresesenta.com</a>
+            <p style="margin:12px 0 0;color:#999;font-size:12px;">© ${new Date().getFullYear()} TRESESENTA</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    });
+    if (error) throw new Error(error.message);
+    console.log(`[EMAIL] ✅ Rechazo enviado a ${email}`);
+    return { success: true, mode: 'resend', id: data.id };
+  } catch (error) {
+    console.error('[EMAIL] Error rechazo:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   sendOTPEmail,
-  sendWelcomeEmail
+  sendWelcomeEmail,
+  sendVerificationApprovedEmail,
+  sendVerificationRejectedEmail,
 };

@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { query, transaction } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
+const { sendVerificationApprovedEmail, sendVerificationRejectedEmail } = require('../services/email');
 
 const router = express.Router();
 
@@ -36,12 +37,18 @@ router.get('/pending', authenticateToken, requireAdmin, async (req, res) => {
             `SELECT vr.id, vr.status, vr.bonus_points, vr.created_at,
                     vr.verification_images,
                     p.id as pin_id, p.title as pin_title, p.image_urls as pin_images,
+                    p.description as pin_description,
                     p.location_name, p.latitude, p.longitude,
+                    p.used_tresesenta, p.shoe_model,
+                    c.name_es as category_name, c.emoji as category_emoji,
+                    ci.name as city_name,
                     u.id as user_id, u.username, u.avatar_url, u.email,
                     u.is_verified_buyer
              FROM verification_requests vr
              JOIN pins p ON vr.pin_id = p.id
              JOIN users u ON vr.user_id = u.id
+             LEFT JOIN categories c ON p.category_id = c.id
+             LEFT JOIN cities ci ON p.city_id = ci.id
              WHERE vr.status = 'pending'
              ORDER BY vr.created_at ASC
              LIMIT $1 OFFSET $2`,
@@ -160,9 +167,10 @@ router.post('/:id/approve',
                      SET verification_status = 'approved',
                          verified_by = $1,
                          verified_at = NOW(),
-                         verification_notes = $2
-                     WHERE id = $3`,
-                    [admin_id, notes || null, vr.pin_id]
+                         verification_notes = $2,
+                         points_awarded = $3
+                     WHERE id = $4`,
+                    [admin_id, notes || null, vr.bonus_points, vr.pin_id]
                 );
 
                 // Dar puntos bonus al usuario
@@ -188,6 +196,20 @@ router.post('/:id/approve',
                     [admin_id, id, notes || 'Aprobado', JSON.stringify({ bonus_points: vr.bonus_points })]
                 );
             });
+
+            // Notificar al creador por email
+            const ownerResult = await query(
+                'SELECT email, username FROM users WHERE id = $1',
+                [vr.pin_owner_id]
+            );
+            if (ownerResult.rows.length > 0) {
+                const owner = ownerResult.rows[0];
+                sendVerificationApprovedEmail(owner.email, owner.username, vr.pin_title, vr.bonus_points).catch(() => {});
+            }
+
+            // WebSocket: el pin tresesenta ahora es visible en el mapa
+            req.app.locals.io?.emit('pin:added', { pin_id: vr.pin_id });
+            req.app.locals.io?.emit('verification:updated', { verif_id: id, pin_id: vr.pin_id, status: 'approved' });
 
             res.json({
                 message: 'Verificación aprobada correctamente',
@@ -224,9 +246,10 @@ router.post('/:id/reject',
 
             // Obtener solicitud
             const request = await query(
-                `SELECT vr.*, p.title as pin_title
+                `SELECT vr.*, p.title as pin_title, u.email as user_email, u.username as user_username
                  FROM verification_requests vr
                  JOIN pins p ON vr.pin_id = p.id
+                 JOIN users u ON vr.user_id = u.id
                  WHERE vr.id = $1`,
                 [id]
             );
@@ -272,6 +295,13 @@ router.post('/:id/reject',
                     [admin_id, id, reason]
                 );
             });
+
+            // Notificar al creador por email
+            sendVerificationRejectedEmail(vr.user_email, vr.user_username, vr.pin_title, reason).catch(() => {});
+
+            // WebSocket: el pin tresesenta sale del mapa
+            req.app.locals.io?.emit('pin:removed', { pin_id: vr.pin_id });
+            req.app.locals.io?.emit('verification:updated', { verif_id: id, pin_id: vr.pin_id, status: 'rejected' });
 
             res.json({ message: 'Verificación rechazada' });
 
