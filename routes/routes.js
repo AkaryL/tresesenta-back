@@ -8,28 +8,48 @@ const router = express.Router();
 // GET /api/routes
 // Obtener todas las rutas
 // ====================================
-router.get('/', async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
     try {
         const { official, limit = 20 } = req.query;
+        const userId = req.user?.id || null;
 
         let queryText = `
             SELECT r.id, r.title, r.description, r.emoji, r.total_pins,
                    r.total_points, r.completions_count, r.difficulty,
                    r.estimated_time, r.is_official, r.created_at,
                    r.cover_image_url,
-                   u.username as creator_username
+                   u.username as creator_username,
+                   ARRAY(
+                     SELECT p.image_urls[1]
+                     FROM route_pins rp2
+                     JOIN pins p ON rp2.pin_id = p.id
+                     WHERE rp2.route_id = r.id
+                       AND p.image_urls IS NOT NULL
+                       AND array_length(p.image_urls, 1) > 0
+                     ORDER BY rp2.order_index ASC
+                     LIMIT 4
+                   ) AS pin_images,
+                   (SELECT p.latitude FROM route_pins rp3
+                    JOIN pins p ON rp3.pin_id = p.id
+                    WHERE rp3.route_id = r.id ORDER BY rp3.order_index ASC LIMIT 1) AS first_lat,
+                   (SELECT p.longitude FROM route_pins rp3
+                    JOIN pins p ON rp3.pin_id = p.id
+                    WHERE rp3.route_id = r.id ORDER BY rp3.order_index ASC LIMIT 1) AS first_lng,
+                   CASE WHEN $2::integer IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM user_routes ur
+                     WHERE ur.user_id = $2 AND ur.route_id = r.id AND ur.status = 'saved'
+                   ) THEN true ELSE false END AS is_saved
             FROM routes r
             LEFT JOIN users u ON r.creator_id = u.id
             WHERE 1=1
         `;
 
-        const params = [];
+        const params = [parseInt(limit), userId];
         if (official === 'true') {
             queryText += ' AND r.is_official = true';
         }
 
         queryText += ' ORDER BY r.completions_count DESC, r.created_at DESC LIMIT $1';
-        params.push(parseInt(limit));
 
         const result = await query(queryText, params);
 
@@ -38,6 +58,36 @@ router.get('/', async (req, res) => {
     } catch (error) {
         console.error('Error al obtener rutas:', error);
         res.status(500).json({ error: 'Error al obtener rutas' });
+    }
+});
+
+// ====================================
+// POST /api/routes/:id/save
+// Toggle guardar/desguardar ruta
+// ====================================
+router.post('/:id/save', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.id;
+
+        const existing = await query(
+            `SELECT id FROM user_routes WHERE user_id = $1 AND route_id = $2`,
+            [userId, id]
+        );
+
+        if (existing.rows.length > 0) {
+            await query(`DELETE FROM user_routes WHERE user_id = $1 AND route_id = $2`, [userId, id]);
+            return res.json({ saved: false });
+        } else {
+            await query(
+                `INSERT INTO user_routes (user_id, route_id, status) VALUES ($1, $2, 'saved')`,
+                [userId, id]
+            );
+            return res.json({ saved: true });
+        }
+    } catch (error) {
+        console.error('Error al guardar ruta:', error);
+        res.status(500).json({ error: 'Error al guardar ruta' });
     }
 });
 
