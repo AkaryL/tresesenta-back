@@ -1,14 +1,59 @@
 /**
- * Servicio de Email con Resend
- * Envía códigos OTP con diseño profesional
+ * Servicio de Email con Nodemailer (SMTP)
+ * Envía códigos OTP y notificaciones con diseño profesional
  */
 
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-// Solo inicializar Resend si hay API key
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+// Crear transporter SMTP
+let transporter = null;
 
-const FROM_EMAIL = process.env.EMAIL_FROM || 'TRESESENTA <onboarding@resend.dev>';
+if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '465'),
+    secure: process.env.SMTP_SECURE !== 'false',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    tls: { rejectUnauthorized: false },
+  });
+
+  transporter.verify()
+    .then(() => console.log('[EMAIL] SMTP conectado correctamente'))
+    .catch((err) => console.error('[EMAIL] Error conectando SMTP:', err.message));
+}
+
+const FROM_NAME = 'TRESESENTA';
+const FROM_EMAIL = process.env.SMTP_USER || 'mapa@tenis360.com';
+
+/**
+ * Enviar email usando SMTP
+ */
+async function sendEmail({ to, subject, html }) {
+  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
+
+  if (EMAIL_MODE === 'console' || !transporter) {
+    console.log(`[EMAIL] Modo console - no se envía email real a ${to}`);
+    return { success: true, mode: 'console' };
+  }
+
+  try {
+    const info = await transporter.sendMail({
+      from: `${FROM_NAME} <${FROM_EMAIL}>`,
+      to,
+      subject,
+      html,
+    });
+
+    console.log(`[EMAIL] Email enviado a ${to} (ID: ${info.messageId})`);
+    return { success: true, mode: 'smtp', id: info.messageId };
+  } catch (error) {
+    console.error('[EMAIL] Error al enviar:', error.message);
+    return { success: false, mode: 'smtp', error: error.message };
+  }
+}
 
 /**
  * Plantilla HTML para el email de OTP
@@ -20,69 +65,50 @@ function getOTPEmailHTML(code, email) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tu código de acceso</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f0eb;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f5f0eb; padding: 40px 20px;">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #ffffff;">
+  <table width="100%" cellspacing="0" cellpadding="0" style="padding: 60px 20px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 480px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
+        <table width="100%" cellspacing="0" cellpadding="0" style="max-width: 400px;">
 
-          <!-- Header con gradiente -->
           <tr>
-            <td style="background: linear-gradient(135deg, #3d2c1f 0%, #c67b5c 100%); padding: 40px 30px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
+            <td style="text-align: center; padding-bottom: 40px;">
+              <h1 style="margin: 0; font-size: 36px; font-weight: 900; color: #1a1a1a; letter-spacing: -1px;">
                 TRESESENTA
               </h1>
-              <p style="margin: 8px 0 0 0; color: rgba(255,255,255,0.9); font-size: 14px; letter-spacing: 2px;">
-                MAPA 360
+            </td>
+          </tr>
+
+          <tr>
+            <td style="text-align: center; padding-bottom: 16px;">
+              <p style="margin: 0; color: #666666; font-size: 16px;">
+                Tu codigo de verificacion:
               </p>
             </td>
           </tr>
 
-          <!-- Contenido -->
           <tr>
-            <td style="padding: 40px 30px;">
-              <h2 style="margin: 0 0 16px 0; color: #3d2c1f; font-size: 22px; font-weight: 700; text-align: center;">
-                Tu código de verificación
-              </h2>
-
-              <p style="margin: 0 0 30px 0; color: #6b6b6b; font-size: 15px; line-height: 1.6; text-align: center;">
-                Ingresa este código para acceder a tu cuenta. Expira en <strong>10 minutos</strong>.
-              </p>
-
-              <!-- Código OTP -->
-              <div style="background: linear-gradient(135deg, #f8f5f2 0%, #f0ebe5 100%); border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 30px;">
-                <p style="margin: 0 0 8px 0; color: #6b6b6b; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">
-                  Código de acceso
-                </p>
-                <div style="font-size: 40px; font-weight: 800; letter-spacing: 8px; color: #c67b5c; font-family: 'Courier New', monospace;">
-                  ${code}
-                </div>
+            <td style="text-align: center; padding-bottom: 24px;">
+              <div style="font-size: 36px; font-weight: 700; letter-spacing: 10px; color: #1a1a1a;">
+                ${code}
               </div>
+            </td>
+          </tr>
 
-              <p style="margin: 0; color: #999999; font-size: 13px; text-align: center; line-height: 1.5;">
-                Si no solicitaste este código, puedes ignorar este email.
-                <br>Tu cuenta permanece segura.
+          <tr>
+            <td style="text-align: center; padding-bottom: 40px;">
+              <p style="margin: 0; color: #999999; font-size: 14px;">
+                Este codigo solo se puede usar una vez. Vencera en 10 minutos.
               </p>
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
-            <td style="background-color: #f8f5f2; padding: 24px 30px; text-align: center; border-top: 1px solid #e8e4e0;">
-              <p style="margin: 0 0 8px 0; color: #3d2c1f; font-size: 14px; font-weight: 600;">
-                ¿Necesitas ayuda?
+            <td style="text-align: center; border-top: 1px solid #eeeeee; padding-top: 24px;">
+              <p style="margin: 0 0 8px 0; color: #999999; font-size: 12px;">
+                &copy; Tenis 360
               </p>
-              <p style="margin: 0; color: #6b6b6b; font-size: 13px;">
-                Contáctanos en <a href="mailto:hola@tresesenta.com" style="color: #c67b5c; text-decoration: none;">hola@tresesenta.com</a>
-              </p>
-              <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e8e4e0;">
-                <p style="margin: 0; color: #999999; font-size: 11px;">
-                  © ${new Date().getFullYear()} TRESESENTA
-                  <br>Este es un email automático, por favor no respondas.
-                </p>
-              </div>
             </td>
           </tr>
 
@@ -99,8 +125,6 @@ function getOTPEmailHTML(code, email) {
  * Enviar código OTP por email
  */
 async function sendOTPEmail(email, code) {
-  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
-
   // Siempre mostrar en consola para debugging
   console.log('\n' + '='.repeat(50));
   console.log('[OTP] CÓDIGO DE VERIFICACIÓN');
@@ -109,60 +133,27 @@ async function sendOTPEmail(email, code) {
   console.log(`CÓDIGO: ${code}`);
   console.log('='.repeat(50) + '\n');
 
-  // Si está en modo console o no hay API key, no enviar email real
-  if (EMAIL_MODE === 'console' || !resend) {
-    console.log('[EMAIL] Modo console - no se envía email real');
-    return { success: true, mode: 'console' };
-  }
-
-  // Enviar email real con Resend
-  try {
-    const { data, error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject: `${code} - Tu código de acceso | TRESESENTA`,
-      html: getOTPEmailHTML(code, email),
-    });
-
-    if (error) {
-      console.error('[EMAIL] Error de Resend:', error);
-      throw new Error(error.message);
-    }
-
-    console.log(`[EMAIL] ✅ Email enviado a ${email} (ID: ${data.id})`);
-    return { success: true, mode: 'resend', id: data.id };
-
-  } catch (error) {
-    console.error('[EMAIL] Error al enviar:', error.message);
-    // No lanzar error para no bloquear el flujo
-    return { success: false, mode: 'resend', error: error.message };
-  }
+  return sendEmail({
+    to: email,
+    subject: `${code} - Tu código de acceso | TRESESENTA`,
+    html: getOTPEmailHTML(code, email),
+  });
 }
 
 /**
  * Enviar email de bienvenida
  */
 async function sendWelcomeEmail(email, firstName) {
-  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
   const name = firstName || 'Cliente';
-
   console.log(`[EMAIL] Bienvenida para: ${email}`);
 
-  if (EMAIL_MODE === 'console' || !resend) {
-    return { success: true, mode: 'console' };
-  }
-
-  try {
-    const { data, error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject: `¡Bienvenido a TRESESENTA, ${name}!`,
-      html: `
+  return sendEmail({
+    to: email,
+    subject: `¡Bienvenido a TRESESENTA, ${name}!`,
+    html: `
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8">
-</head>
+<head><meta charset="utf-8"></head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f5f0eb;">
   <table width="100%" cellspacing="0" cellpadding="0" style="padding: 40px 20px;">
     <tr>
@@ -175,7 +166,7 @@ async function sendWelcomeEmail(email, firstName) {
           </tr>
           <tr>
             <td style="padding: 40px;">
-              <h2 style="margin: 0 0 16px 0; color: #3d2c1f; font-size: 24px;">¡Hola ${name}! 👋</h2>
+              <h2 style="margin: 0 0 16px 0; color: #3d2c1f; font-size: 24px;">Hola ${name}!</h2>
               <p style="color: #6b6b6b; font-size: 15px; line-height: 1.6;">
                 Tu cuenta ha sido creada exitosamente. Ya puedes acceder a tu perfil, ver tu colección y mucho más.
               </p>
@@ -196,41 +187,20 @@ async function sendWelcomeEmail(email, firstName) {
     </tr>
   </table>
 </body>
-</html>
-      `,
-    });
-
-    if (error) throw new Error(error.message);
-    return { success: true, mode: 'resend', id: data.id };
-
-  } catch (error) {
-    console.error('[EMAIL] Error welcome:', error.message);
-    return { success: false, error: error.message };
-  }
+</html>`,
+  });
 }
 
 /**
  * Enviar notificación de verificación aprobada
  */
 async function sendVerificationApprovedEmail(email, username, pinTitle, bonusPoints) {
-  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
+  console.log(`[EMAIL] Verificación aprobada para: ${email} - Pin: ${pinTitle}`);
 
-  console.log('\n' + '='.repeat(50));
-  console.log('[EMAIL] VERIFICACIÓN APROBADA');
-  console.log(`Para: ${email} (@${username})`);
-  console.log(`Pin: ${pinTitle} | Puntos bonus: ${bonusPoints}`);
-  console.log('='.repeat(50) + '\n');
-
-  if (EMAIL_MODE === 'console' || !resend) {
-    return { success: true, mode: 'console' };
-  }
-
-  try {
-    const { data, error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject: `✅ Tu pin fue aprobado | TRESESENTA`,
-      html: `
+  return sendEmail({
+    to: email,
+    subject: 'Tu pin fue aprobado | TRESESENTA',
+    html: `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -246,8 +216,7 @@ async function sendVerificationApprovedEmail(email, username, pinTitle, bonusPoi
         <tr>
           <td style="padding:40px;">
             <div style="text-align:center;margin-bottom:24px;">
-              <div style="font-size:48px;">✅</div>
-              <h2 style="margin:12px 0 0;color:#2e7d32;font-size:22px;">¡Tu pin fue aprobado!</h2>
+              <h2 style="margin:12px 0 0;color:#2e7d32;font-size:22px;">Tu pin fue aprobado!</h2>
             </div>
             <p style="color:#6b6b6b;font-size:15px;line-height:1.6;">
               Hola <strong>@${username}</strong>,<br><br>
@@ -257,11 +226,7 @@ async function sendVerificationApprovedEmail(email, username, pinTitle, bonusPoi
             <div style="background:#e8f5e9;border-radius:12px;padding:20px;text-align:center;margin:24px 0;">
               <p style="margin:0;color:#2e7d32;font-size:13px;text-transform:uppercase;letter-spacing:2px;">Puntos ganados</p>
               <p style="margin:8px 0 0;color:#1b5e20;font-size:36px;font-weight:800;">+${bonusPoints}</p>
-            </div>
-            ` : ''}
-            <p style="color:#999;font-size:13px;text-align:center;margin-top:24px;">
-              Ya puedes ver tu pin en el mapa con el sello TRESESENTA.
-            </p>
+            </div>` : ''}
           </td>
         </tr>
         <tr>
@@ -274,39 +239,19 @@ async function sendVerificationApprovedEmail(email, username, pinTitle, bonusPoi
   </table>
 </body>
 </html>`,
-    });
-    if (error) throw new Error(error.message);
-    console.log(`[EMAIL] ✅ Aprobación enviada a ${email}`);
-    return { success: true, mode: 'resend', id: data.id };
-  } catch (error) {
-    console.error('[EMAIL] Error aprobación:', error.message);
-    return { success: false, error: error.message };
-  }
+  });
 }
 
 /**
  * Enviar notificación de verificación rechazada
  */
 async function sendVerificationRejectedEmail(email, username, pinTitle, reason) {
-  const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
+  console.log(`[EMAIL] Verificación rechazada para: ${email} - Pin: ${pinTitle}`);
 
-  console.log('\n' + '='.repeat(50));
-  console.log('[EMAIL] VERIFICACIÓN RECHAZADA');
-  console.log(`Para: ${email} (@${username})`);
-  console.log(`Pin: ${pinTitle}`);
-  console.log(`Razón: ${reason}`);
-  console.log('='.repeat(50) + '\n');
-
-  if (EMAIL_MODE === 'console' || !resend) {
-    return { success: true, mode: 'console' };
-  }
-
-  try {
-    const { data, error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject: `Tu pin requiere cambios | TRESESENTA`,
-      html: `
+  return sendEmail({
+    to: email,
+    subject: 'Tu pin requiere cambios | TRESESENTA',
+    html: `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -322,7 +267,6 @@ async function sendVerificationRejectedEmail(email, username, pinTitle, reason) 
         <tr>
           <td style="padding:40px;">
             <div style="text-align:center;margin-bottom:24px;">
-              <div style="font-size:48px;">❌</div>
               <h2 style="margin:12px 0 0;color:#c62828;font-size:22px;">Verificación no aprobada</h2>
             </div>
             <p style="color:#6b6b6b;font-size:15px;line-height:1.6;">
@@ -333,14 +277,11 @@ async function sendVerificationRejectedEmail(email, username, pinTitle, reason) 
               <p style="margin:0 0 8px;color:#c62828;font-size:12px;text-transform:uppercase;letter-spacing:2px;font-weight:700;">Motivo</p>
               <p style="margin:0;color:#b71c1c;font-size:15px;line-height:1.5;">"${reason}"</p>
             </div>
-            <p style="color:#6b6b6b;font-size:14px;line-height:1.6;">
-              Si crees que es un error o tienes más información, puedes intentarlo de nuevo con evidencia adicional.
-            </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8f5f2;padding:20px;text-align:center;">
-            <p style="margin:0 0 4px;color:#6b6b6b;font-size:13px;">¿Tienes dudas? Escríbenos a</p>
+            <p style="margin:0 0 4px;color:#6b6b6b;font-size:13px;">Dudas? Escríbenos a</p>
             <a href="mailto:hola@tresesenta.com" style="color:#c67b5c;font-size:13px;text-decoration:none;">hola@tresesenta.com</a>
             <p style="margin:12px 0 0;color:#999;font-size:12px;">© ${new Date().getFullYear()} TRESESENTA</p>
           </td>
@@ -350,14 +291,7 @@ async function sendVerificationRejectedEmail(email, username, pinTitle, reason) 
   </table>
 </body>
 </html>`,
-    });
-    if (error) throw new Error(error.message);
-    console.log(`[EMAIL] ✅ Rechazo enviado a ${email}`);
-    return { success: true, mode: 'resend', id: data.id };
-  } catch (error) {
-    console.error('[EMAIL] Error rechazo:', error.message);
-    return { success: false, error: error.message };
-  }
+  });
 }
 
 module.exports = {

@@ -23,11 +23,8 @@ const otpRateLimiter = rateLimit({
 });
 
 // Generar código OTP de 6 dígitos
-// TODO: Cambiar a código aleatorio cuando se configure el email
 function generateOTP() {
-    // Código fijo para desarrollo (cambiar cuando esté listo el email)
-    return '123456';
-    // return Math.floor(100000 + Math.random() * 900000).toString();
+    return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 // ====================================
