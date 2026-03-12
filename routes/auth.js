@@ -62,8 +62,8 @@ router.post('/request-code',
             const codeHash = await bcrypt.hash(code, 10);
             const ttlMinutes = parseInt(process.env.OTP_TTL_MINUTES) || 10;
 
-            // Invalidar códigos anteriores
-            await query('UPDATE otp_codes SET used = TRUE WHERE email = $1', [normalizedEmail]);
+            // Borrar códigos anteriores de este email y limpiar expirados/usados de todos
+            await query('DELETE FROM otp_codes WHERE email = $1 AND (used = TRUE OR expires_at < NOW())', [normalizedEmail]);
 
             // Guardar nuevo código (usar NOW() de PostgreSQL para evitar problemas de timezone)
             await query(
@@ -131,7 +131,7 @@ router.post('/register-and-send-code',
             const codeHash = await bcrypt.hash(code, 10);
             const ttlMinutes = parseInt(process.env.OTP_TTL_MINUTES) || 10;
 
-            await query('UPDATE otp_codes SET used = TRUE WHERE email = $1', [normalizedEmail]);
+            await query('DELETE FROM otp_codes WHERE email = $1 AND (used = TRUE OR expires_at < NOW())', [normalizedEmail]);
             await query(
                 `INSERT INTO otp_codes (email, code_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '${ttlMinutes} minutes')`,
                 [normalizedEmail, codeHash]

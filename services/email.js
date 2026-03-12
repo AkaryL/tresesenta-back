@@ -3,26 +3,36 @@
  * Envía códigos OTP y notificaciones con diseño profesional
  */
 
+require('dotenv').config();
 const nodemailer = require('nodemailer');
 
 // Crear transporter SMTP
 let transporter = null;
 
 if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  const smtpPort = parseInt(process.env.SMTP_PORT || '465');
+  const smtpSecure = process.env.SMTP_SECURE !== 'false';
+
+  console.log(`[EMAIL] Configurando SMTP: ${process.env.SMTP_HOST}:${smtpPort} (secure: ${smtpSecure})`);
+
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '465'),
-    secure: process.env.SMTP_SECURE !== 'false',
+    port: smtpPort,
+    secure: smtpSecure,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
     tls: { rejectUnauthorized: false },
+    connectionTimeout: 10000,
+    socketTimeout: 10000,
   });
 
   transporter.verify()
     .then(() => console.log('[EMAIL] SMTP conectado correctamente'))
-    .catch((err) => console.error('[EMAIL] Error conectando SMTP:', err.message));
+    .catch((err) => console.error('[EMAIL] Error conectando SMTP:', err.code, err.message));
+} else {
+  console.log('[EMAIL] Variables SMTP no encontradas, modo console activado');
 }
 
 const FROM_NAME = 'TRESESENTA';
