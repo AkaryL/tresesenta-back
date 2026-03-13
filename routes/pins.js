@@ -196,7 +196,8 @@ router.post('/',
                 shoe_model,
                 image_urls,
                 video_url,
-                used_tresesenta = false
+                used_tresesenta = false,
+                state_name
             } = req.body;
 
             const user_id = req.user.id;
@@ -261,13 +262,13 @@ router.post('/',
                     `INSERT INTO pins
                     (user_id, category_id, title, description, location_name, latitude, longitude,
                      city_id, shoe_model, image_urls, video_url, points_awarded,
-                     used_tresesenta, verification_status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                     used_tresesenta, verification_status, state_name)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                     RETURNING *`,
                     [user_id, category_id, title, description, location_name || null,
                         latitude, longitude, city_id || null, shoe_model || null,
                         image_urls || [], video_url || null, points_awarded_now,
-                        used_tresesenta, verification_status]
+                        used_tresesenta, verification_status, state_name || null]
                 );
 
                 const pin = pinResult.rows[0];

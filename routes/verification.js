@@ -200,12 +200,12 @@ router.post('/:id/approve',
                 return res.status(400).json({ error: 'Esta solicitud ya fue procesada' });
             }
 
-            // Get pin coordinates for state badge unlock
+            // Get pin data for state badge unlock
             const pinData = await query(
-                'SELECT latitude, longitude FROM pins WHERE id = $1',
+                'SELECT latitude, longitude, state_name FROM pins WHERE id = $1',
                 [vr.pin_id]
             );
-            const pinCoords = pinData.rows[0];
+            const pinInfo = pinData.rows[0];
 
             let unlockedBadge = null;
 
@@ -258,11 +258,12 @@ router.post('/:id/approve',
                 );
 
                 // Try to unlock state badge based on pin location
-                if (pinCoords?.latitude && pinCoords?.longitude) {
-                    const stateName = await getStateFromCoords(pinCoords.latitude, pinCoords.longitude);
-                    if (stateName) {
-                        unlockedBadge = await tryUnlockStateBadge(client, vr.pin_owner_id, stateName);
-                    }
+                let stateName = pinInfo?.state_name;
+                if (!stateName && pinInfo?.latitude && pinInfo?.longitude) {
+                    stateName = await getStateFromCoords(pinInfo.latitude, pinInfo.longitude);
+                }
+                if (stateName) {
+                    unlockedBadge = await tryUnlockStateBadge(client, vr.pin_owner_id, stateName);
                 }
             });
 
