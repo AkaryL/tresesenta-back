@@ -128,10 +128,10 @@ router.get('/leaderboard', async (req, res) => {
         let queryText;
         let params = [parseInt(limit)];
 
-        if (period === 'week') {
+        if (period === 'week' || period === 'weekly') {
             // Leaderboard de la semana
             queryText = `
-                SELECT u.id, u.username, u.avatar_url, u.level, u.profile_color,
+                SELECT u.id as user_id, u.username, u.full_name, u.avatar_url, u.level, u.profile_color,
                        COALESCE(SUM(pt.points), 0) as period_points,
                        u.total_points
                 FROM users u
@@ -142,10 +142,10 @@ router.get('/leaderboard', async (req, res) => {
                 ORDER BY period_points DESC
                 LIMIT $1
             `;
-        } else if (period === 'month') {
+        } else if (period === 'month' || period === 'monthly') {
             // Leaderboard del mes
             queryText = `
-                SELECT u.id, u.username, u.avatar_url, u.level, u.profile_color,
+                SELECT u.id as user_id, u.username, u.full_name, u.avatar_url, u.level, u.profile_color,
                        COALESCE(SUM(pt.points), 0) as period_points,
                        u.total_points
                 FROM users u
@@ -159,7 +159,7 @@ router.get('/leaderboard', async (req, res) => {
         } else {
             // Leaderboard total
             queryText = `
-                SELECT id, username, avatar_url, level, profile_color,
+                SELECT id as user_id, username, full_name, avatar_url, level, profile_color,
                        total_points, total_points as period_points
                 FROM users
                 WHERE is_banned = false
@@ -173,6 +173,8 @@ router.get('/leaderboard', async (req, res) => {
         // Agregar posición
         const leaderboard = result.rows.map((user, index) => ({
             ...user,
+            user_id: user.user_id || user.id,
+            rank: index + 1,
             position: index + 1
         }));
 
