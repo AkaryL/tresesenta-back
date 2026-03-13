@@ -6,6 +6,58 @@ const { sendVerificationApprovedEmail, sendVerificationRejectedEmail } = require
 
 const router = express.Router();
 
+// ── Reverse geocode to get Mexican state from lat/lng ──
+async function getStateFromCoords(lat, lng) {
+    try {
+        const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+        if (!apiKey) return null;
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&language=es`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.results) {
+            for (const result of data.results) {
+                for (const comp of result.address_components) {
+                    if (comp.types.includes('administrative_area_level_1')) {
+                        return comp.long_name;
+                    }
+                }
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error('[BADGES] Error reverse geocoding:', e.message);
+        return null;
+    }
+}
+
+// ── Try to unlock a state badge for a user ──
+async function tryUnlockStateBadge(client, userId, stateName) {
+    if (!stateName) return null;
+    // Normalize: Google may return "Estado de México" or "México" etc
+    const badge = await client.query(
+        `SELECT id, name FROM badges
+         WHERE geographic_scope = 'state' AND scope_value = $1 AND is_active = true`,
+        [stateName]
+    );
+    if (badge.rows.length === 0) return null;
+
+    const badgeId = badge.rows[0].id;
+    // Check if already earned
+    const existing = await client.query(
+        `SELECT id FROM user_badges WHERE user_id = $1 AND badge_id = $2`,
+        [userId, badgeId]
+    );
+    if (existing.rows.length > 0) return null;
+
+    // Unlock!
+    await client.query(
+        `INSERT INTO user_badges (user_id, badge_id, earned_at) VALUES ($1, $2, NOW())`,
+        [userId, badgeId]
+    );
+    console.log(`[BADGES] User ${userId} unlocked "${badge.rows[0].name}" (${stateName})`);
+    return badge.rows[0];
+}
+
 // Middleware para verificar admin
 const requireAdmin = async (req, res, next) => {
     try {
@@ -148,6 +200,15 @@ router.post('/:id/approve',
                 return res.status(400).json({ error: 'Esta solicitud ya fue procesada' });
             }
 
+            // Get pin coordinates for state badge unlock
+            const pinData = await query(
+                'SELECT latitude, longitude FROM pins WHERE id = $1',
+                [vr.pin_id]
+            );
+            const pinCoords = pinData.rows[0];
+
+            let unlockedBadge = null;
+
             await transaction(async (client) => {
                 // Actualizar solicitud
                 await client.query(
@@ -195,6 +256,14 @@ router.post('/:id/approve',
                      VALUES ($1, 'approve_verification', 'verification', $2, $3, $4)`,
                     [admin_id, id, notes || 'Aprobado', JSON.stringify({ bonus_points: vr.bonus_points })]
                 );
+
+                // Try to unlock state badge based on pin location
+                if (pinCoords?.latitude && pinCoords?.longitude) {
+                    const stateName = await getStateFromCoords(pinCoords.latitude, pinCoords.longitude);
+                    if (stateName) {
+                        unlockedBadge = await tryUnlockStateBadge(client, vr.pin_owner_id, stateName);
+                    }
+                }
             });
 
             // Notificar al creador por email
@@ -213,7 +282,8 @@ router.post('/:id/approve',
 
             res.json({
                 message: 'Verificación aprobada correctamente',
-                bonus_points_awarded: vr.bonus_points
+                bonus_points_awarded: vr.bonus_points,
+                unlocked_badge: unlockedBadge ? unlockedBadge.name : null
             });
 
         } catch (error) {
