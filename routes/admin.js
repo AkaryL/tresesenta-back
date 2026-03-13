@@ -302,6 +302,41 @@ router.post('/badges',
 );
 
 // ====================================
+// DELETE /api/admin/badges/:id
+// Eliminar una medalla
+// ====================================
+router.delete('/badges/:id',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Remove user_badges references first
+            await query('DELETE FROM user_badges WHERE badge_id = $1', [id]);
+
+            const result = await query(
+                'DELETE FROM badges WHERE id = $1 RETURNING *',
+                [id]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Medalla no encontrada' });
+            }
+
+            res.json({
+                message: 'Medalla eliminada',
+                badge: result.rows[0]
+            });
+
+        } catch (error) {
+            console.error('Error al eliminar medalla:', error);
+            res.status(500).json({ error: 'Error al eliminar medalla' });
+        }
+    }
+);
+
+// ====================================
 // GET /api/admin/users
 // Obtener lista de usuarios (admin)
 // ====================================
