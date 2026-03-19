@@ -78,7 +78,7 @@ router.post('/request-code',
                 status: 'OTP_SENT',
                 message: 'Código enviado a tu email',
                 expires_in_minutes: ttlMinutes,
-                debug_code: code
+                ...(process.env.NODE_ENV !== 'production' && { debug_code: code })
             });
 
         } catch (error) {
