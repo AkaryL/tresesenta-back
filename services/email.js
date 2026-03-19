@@ -1,5 +1,5 @@
 /**
- * Servicio de Email con Nodemailer (SMTP)
+ * Servicio de Email - Brevo HTTP API + SMTP fallback
  * Envía códigos OTP y notificaciones con diseño profesional
  */
 
@@ -7,63 +7,91 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const nodemailer = require('nodemailer');
 
-// Crear transporter SMTP
+const FROM_NAME = 'TRESESENTA';
+const FROM_EMAIL = process.env.BREVO_SENDER || process.env.SMTP_USER || 'mapa@tenis360.com';
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+
+// SMTP fallback (for local dev)
 let transporter = null;
-
-if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-  const smtpPort = parseInt(process.env.SMTP_PORT || '465');
-  const smtpSecure = process.env.SMTP_SECURE !== 'false';
-
-  console.log(`[EMAIL] Configurando SMTP: ${process.env.SMTP_HOST}:${smtpPort} (secure: ${smtpSecure})`);
-
+if (!BREVO_API_KEY && process.env.SMTP_USER && process.env.SMTP_PASS) {
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: smtpPort,
-    secure: smtpSecure,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+    port: parseInt(process.env.SMTP_PORT || '465'),
+    secure: process.env.SMTP_SECURE !== 'false',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     tls: { rejectUnauthorized: false },
-    connectionTimeout: 10000,
-    socketTimeout: 10000,
   });
-
   transporter.verify()
     .then(() => console.log('[EMAIL] SMTP conectado correctamente'))
-    .catch((err) => console.error('[EMAIL] Error conectando SMTP:', err.code, err.message));
-} else {
-  console.log('[EMAIL] Variables SMTP no encontradas, modo console activado');
+    .catch((err) => console.error('[EMAIL] Error SMTP:', err.message));
 }
 
-const FROM_NAME = 'TRESESENTA';
-const FROM_EMAIL = process.env.SMTP_USER || 'mapa@tenis360.com';
+if (BREVO_API_KEY) {
+  console.log('[EMAIL] Brevo HTTP API configurada');
+} else if (transporter) {
+  console.log('[EMAIL] Modo SMTP activo');
+} else {
+  console.log('[EMAIL] Modo console (sin credenciales)');
+}
 
 /**
- * Enviar email usando SMTP
+ * Enviar email via Brevo HTTP API o SMTP fallback
  */
 async function sendEmail({ to, subject, html }) {
   const EMAIL_MODE = process.env.EMAIL_MODE || 'console';
 
-  if (EMAIL_MODE === 'console' || !transporter) {
+  if (EMAIL_MODE === 'console') {
     console.log(`[EMAIL] Modo console - no se envía email real a ${to}`);
     return { success: true, mode: 'console' };
   }
 
-  try {
-    const info = await transporter.sendMail({
-      from: `${FROM_NAME} <${FROM_EMAIL}>`,
-      to,
-      subject,
-      html,
-    });
-
-    console.log(`[EMAIL] Email enviado a ${to} (ID: ${info.messageId})`);
-    return { success: true, mode: 'smtp', id: info.messageId };
-  } catch (error) {
-    console.error('[EMAIL] Error al enviar:', error.message);
-    return { success: false, mode: 'smtp', error: error.message };
+  // Brevo HTTP API (works on DigitalOcean, no SMTP ports needed)
+  if (BREVO_API_KEY) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': BREVO_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: FROM_NAME, email: FROM_EMAIL },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        console.log(`[EMAIL] Brevo: enviado a ${to} (ID: ${data.messageId})`);
+        return { success: true, mode: 'brevo', id: data.messageId };
+      } else {
+        console.error(`[EMAIL] Brevo error:`, data.message || data);
+        return { success: false, mode: 'brevo', error: data.message };
+      }
+    } catch (error) {
+      console.error('[EMAIL] Brevo error:', error.message);
+      return { success: false, mode: 'brevo', error: error.message };
+    }
   }
+
+  // SMTP fallback
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: `${FROM_NAME} <${FROM_EMAIL}>`,
+        to, subject, html,
+      });
+      console.log(`[EMAIL] SMTP: enviado a ${to} (ID: ${info.messageId})`);
+      return { success: true, mode: 'smtp', id: info.messageId };
+    } catch (error) {
+      console.error('[EMAIL] SMTP error:', error.message);
+      return { success: false, mode: 'smtp', error: error.message };
+    }
+  }
+
+  console.log(`[EMAIL] Sin proveedor configurado, no se envió a ${to}`);
+  return { success: false, mode: 'none', error: 'No email provider' };
 }
 
 /**
