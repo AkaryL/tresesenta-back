@@ -27,7 +27,7 @@ router.get('/', optionalAuth, async (req, res) => {
                 p.latitude, p.longitude, p.image_urls, p.video_url,
                 p.likes_count, p.comments_count, p.shares_count,
                 p.is_featured, p.created_at,
-                p.used_tresesenta, p.verification_status,
+                p.used_tresesenta, p.verification_status, p.google_place_id,
                 u.id as user_id, u.username, u.avatar_url, u.is_verified_buyer,
                 c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
                 ci.name as city_name
@@ -197,7 +197,8 @@ router.post('/',
                 image_urls,
                 video_url,
                 used_tresesenta = false,
-                state_name
+                state_name,
+                google_place_id
             } = req.body;
 
             const user_id = req.user.id;
@@ -262,13 +263,13 @@ router.post('/',
                     `INSERT INTO pins
                     (user_id, category_id, title, description, location_name, latitude, longitude,
                      city_id, shoe_model, image_urls, video_url, points_awarded,
-                     used_tresesenta, verification_status, state_name)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                     used_tresesenta, verification_status, state_name, google_place_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     RETURNING *`,
-                    [user_id, category_id, title, description, location_name || null,
+                    [user_id, category_id, title, description || null, location_name || null,
                         latitude, longitude, city_id || null, shoe_model || null,
                         image_urls || [], video_url || null, points_awarded_now,
-                        used_tresesenta, verification_status, state_name || null]
+                        used_tresesenta, verification_status, state_name || null, google_place_id || null]
                 );
 
                 const pin = pinResult.rows[0];
