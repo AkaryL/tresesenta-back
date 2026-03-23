@@ -187,6 +187,90 @@ router.get('/leaderboard', async (req, res) => {
 });
 
 // ====================================
+// GET /api/points/leaderboard/states
+// Ranking por estado - quién más ha publicado por estado
+// ====================================
+router.get('/leaderboard/states', async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT p.state_name as state,
+                   u.id as user_id, u.username, u.full_name, u.avatar_url, u.profile_color,
+                   COUNT(p.id) as pin_count
+            FROM pins p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.state_name IS NOT NULL
+              AND p.is_hidden = false
+              AND (p.verification_status = 'approved' OR p.verification_status = 'none')
+            GROUP BY p.state_name, u.id, u.username, u.full_name, u.avatar_url, u.profile_color
+            ORDER BY p.state_name, pin_count DESC
+        `);
+
+        // Group by state, keep top 3 per state
+        const stateMap = {};
+        for (const row of result.rows) {
+            if (!stateMap[row.state]) stateMap[row.state] = [];
+            if (stateMap[row.state].length < 3) {
+                stateMap[row.state].push({
+                    user_id: row.user_id,
+                    username: row.username,
+                    full_name: row.full_name,
+                    avatar_url: row.avatar_url,
+                    profile_color: row.profile_color,
+                    pin_count: parseInt(row.pin_count),
+                });
+            }
+        }
+
+        // Also get total pins per state
+        const stateTotals = await query(`
+            SELECT state_name as state, COUNT(*) as total_pins
+            FROM pins
+            WHERE state_name IS NOT NULL AND is_hidden = false
+              AND (verification_status = 'approved' OR verification_status = 'none')
+            GROUP BY state_name
+            ORDER BY total_pins DESC
+        `);
+
+        const states = stateTotals.rows.map(s => ({
+            state: s.state,
+            total_pins: parseInt(s.total_pins),
+            top_users: stateMap[s.state] || [],
+        }));
+
+        res.json({ states });
+    } catch (error) {
+        console.error('Error leaderboard states:', error);
+        res.status(500).json({ error: 'Error al obtener ranking por estado' });
+    }
+});
+
+// ====================================
+// GET /api/points/leaderboard/cities
+// Ciudades más visitadas
+// ====================================
+router.get('/leaderboard/cities', async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT ci.name as city, ci.id as city_id,
+                   COUNT(p.id) as total_pins,
+                   COUNT(DISTINCT p.user_id) as unique_users
+            FROM pins p
+            JOIN cities ci ON p.city_id = ci.id
+            WHERE p.is_hidden = false
+              AND (p.verification_status = 'approved' OR p.verification_status = 'none')
+            GROUP BY ci.id, ci.name
+            ORDER BY total_pins DESC
+            LIMIT 20
+        `);
+
+        res.json({ cities: result.rows.map((c, i) => ({ ...c, rank: i + 1, total_pins: parseInt(c.total_pins), unique_users: parseInt(c.unique_users) })) });
+    } catch (error) {
+        console.error('Error leaderboard cities:', error);
+        res.status(500).json({ error: 'Error al obtener ciudades' });
+    }
+});
+
+// ====================================
 // POST /api/points/daily-login
 // Registrar login diario y dar puntos
 // ====================================
