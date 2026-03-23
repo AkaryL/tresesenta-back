@@ -168,7 +168,7 @@ router.post('/',
     authenticateToken,
     [
         body('title').trim().notEmpty().withMessage('Título requerido'),
-        body('description').trim().notEmpty().withMessage('Descripción requerida'),
+        body('description').optional().trim(),
         body('latitude').isFloat({ min: -90, max: 90 }).withMessage('Latitud inválida'),
         body('longitude').isFloat({ min: -180, max: 180 }).withMessage('Longitud inválida'),
         body('category_id').isInt().withMessage('Categoría requerida'),
