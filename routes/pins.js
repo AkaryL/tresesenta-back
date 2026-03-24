@@ -161,6 +161,35 @@ router.get('/:id', optionalAuth, async (req, res) => {
 });
 
 // ====================================
+// GET /api/pins/mine
+// Obtener pines del usuario actual
+// ====================================
+router.get('/mine', authenticateToken, async (req, res) => {
+    try {
+        const user_id = req.user.id;
+        const result = await query(`
+            SELECT
+                p.id, p.title, p.description, p.location_name,
+                p.latitude, p.longitude, p.image_urls,
+                p.likes_count, p.comments_count,
+                p.created_at, p.verification_status, p.google_place_id,
+                c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
+                ci.name as city_name
+            FROM pins p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN cities ci ON p.city_id = ci.id
+            WHERE p.user_id = $1 AND p.is_hidden = false
+            ORDER BY p.created_at DESC
+        `, [user_id]);
+
+        res.json({ pins: result.rows });
+    } catch (error) {
+        console.error('Error al obtener mis pines:', error);
+        res.status(500).json({ error: 'Error al obtener pines' });
+    }
+});
+
+// ====================================
 // POST /api/pins
 // Crear un nuevo pin (con soporte para verificación TRESESENTA)
 // ====================================
