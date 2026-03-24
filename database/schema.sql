@@ -68,7 +68,8 @@ CREATE TABLE categories (
     name_es VARCHAR(50) NOT NULL,
     emoji VARCHAR(10),
     color VARCHAR(20),
-    description TEXT
+    description TEXT,
+    icon_url TEXT
 );
 
 -- Insertar categorías predefinidas (según diseño Mapa 360)

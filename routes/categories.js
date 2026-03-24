@@ -10,7 +10,7 @@ const router = express.Router();
 router.get('/', async (req, res) => {
     try {
         const result = await query(
-            `SELECT id, name, name_es, emoji, color, description
+            `SELECT id, name, name_es, emoji, color, description, icon_url
              FROM categories
              ORDER BY id`
         );

@@ -29,7 +29,7 @@ router.get('/', optionalAuth, async (req, res) => {
                 p.is_featured, p.created_at,
                 p.used_tresesenta, p.verification_status, p.google_place_id,
                 u.id as user_id, u.username, u.avatar_url, u.is_verified_buyer,
-                c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
+                c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color, c.icon_url as category_icon_url,
                 ci.name as city_name
             FROM pins p
             LEFT JOIN users u ON p.user_id = u.id
@@ -115,7 +115,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
             `SELECT
                 p.*,
                 u.id as user_id, u.username, u.avatar_url, u.level, u.is_verified_buyer, u.profile_color,
-                c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,
+                c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color, c.icon_url as category_icon_url,
                 ci.name as city_name, ci.region as city_region
             FROM pins p
             LEFT JOIN users u ON p.user_id = u.id

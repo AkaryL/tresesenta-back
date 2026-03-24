@@ -337,6 +337,179 @@ router.delete('/badges/:id',
 );
 
 // ====================================
+// GET /api/admin/categories
+// Obtener todas las categorías (admin)
+// ====================================
+router.get('/categories', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const result = await query(
+            `SELECT c.*, COUNT(p.id) as pins_count
+             FROM categories c
+             LEFT JOIN pins p ON c.id = p.category_id AND p.is_hidden = false
+             GROUP BY c.id
+             ORDER BY c.id`
+        );
+        res.json({ categories: result.rows });
+    } catch (error) {
+        console.error('Error al obtener categorías:', error);
+        res.status(500).json({ error: 'Error al obtener categorías' });
+    }
+});
+
+// ====================================
+// POST /api/admin/categories
+// Crear nueva categoría
+// ====================================
+router.post('/categories',
+    authenticateToken,
+    requireAdmin,
+    [
+        body('name').trim().notEmpty().withMessage('Nombre (clave) requerido'),
+        body('name_es').trim().notEmpty().withMessage('Nombre en español requerido'),
+    ],
+    async (req, res) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ errors: errors.array() });
+            }
+
+            const { name, name_es, emoji, color, description, icon_url } = req.body;
+            const admin_id = req.user.id;
+
+            const result = await query(
+                `INSERT INTO categories (name, name_es, emoji, color, description, icon_url)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING *`,
+                [name, name_es, emoji || '📍', color || '#999999', description || '', icon_url || null]
+            );
+
+            await query(
+                `INSERT INTO moderation_logs (admin_id, action_type, target_type, target_id, reason)
+                 VALUES ($1, 'create_category', 'category', $2, $3)`,
+                [admin_id, result.rows[0].id, `Categoría creada: ${name_es}`]
+            );
+
+            res.status(201).json({ message: 'Categoría creada', category: result.rows[0] });
+        } catch (error) {
+            if (error.code === '23505') {
+                return res.status(400).json({ error: 'Ya existe una categoría con ese nombre clave' });
+            }
+            console.error('Error al crear categoría:', error);
+            res.status(500).json({ error: 'Error al crear categoría' });
+        }
+    }
+);
+
+// ====================================
+// PUT /api/admin/categories/:id
+// Actualizar una categoría
+// ====================================
+router.put('/categories/:id',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { name, name_es, emoji, color, description, icon_url } = req.body;
+            const admin_id = req.user.id;
+
+            const result = await query(
+                `UPDATE categories
+                 SET name = COALESCE($1, name),
+                     name_es = COALESCE($2, name_es),
+                     emoji = COALESCE($3, emoji),
+                     color = COALESCE($4, color),
+                     description = COALESCE($5, description),
+                     icon_url = COALESCE($6, icon_url)
+                 WHERE id = $7
+                 RETURNING *`,
+                [name, name_es, emoji, color, description, icon_url, id]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Categoría no encontrada' });
+            }
+
+            await query(
+                `INSERT INTO moderation_logs (admin_id, action_type, target_type, target_id, reason)
+                 VALUES ($1, 'update_category', 'category', $2, $3)`,
+                [admin_id, id, `Categoría actualizada: ${result.rows[0].name_es}`]
+            );
+
+            res.json({ message: 'Categoría actualizada', category: result.rows[0] });
+        } catch (error) {
+            if (error.code === '23505') {
+                return res.status(400).json({ error: 'Ya existe una categoría con ese nombre clave' });
+            }
+            console.error('Error al actualizar categoría:', error);
+            res.status(500).json({ error: 'Error al actualizar categoría' });
+        }
+    }
+);
+
+// ====================================
+// DELETE /api/admin/categories/:id
+// Eliminar una categoría
+// ====================================
+router.delete('/categories/:id',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { move_to } = req.body || {};
+            const admin_id = req.user.id;
+
+            // Verificar pines asociados
+            const pinsCheck = await query(
+                'SELECT COUNT(*) as count FROM pins WHERE category_id = $1',
+                [id]
+            );
+
+            const pinsCount = parseInt(pinsCheck.rows[0].count);
+
+            if (pinsCount > 0 && !move_to) {
+                return res.status(400).json({
+                    error: `No se puede eliminar: tiene ${pinsCount} pines asociados`,
+                    pins_count: pinsCount,
+                    requires_move: true
+                });
+            }
+
+            // Mover pines si se indicó categoría destino
+            if (pinsCount > 0 && move_to) {
+                const targetExists = await query('SELECT id FROM categories WHERE id = $1', [move_to]);
+                if (targetExists.rows.length === 0) {
+                    return res.status(400).json({ error: 'Categoría destino no encontrada' });
+                }
+                await query('UPDATE pins SET category_id = $1 WHERE category_id = $2', [move_to, id]);
+            }
+
+            const result = await query(
+                'DELETE FROM categories WHERE id = $1 RETURNING *',
+                [id]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Categoría no encontrada' });
+            }
+
+            await query(
+                `INSERT INTO moderation_logs (admin_id, action_type, target_type, target_id, reason)
+                 VALUES ($1, 'delete_category', 'category', $2, $3)`,
+                [admin_id, id, `Categoría eliminada: ${result.rows[0].name_es}`]
+            );
+
+            res.json({ message: 'Categoría eliminada', category: result.rows[0] });
+        } catch (error) {
+            console.error('Error al eliminar categoría:', error);
+            res.status(500).json({ error: 'Error al eliminar categoría' });
+        }
+    }
+);
+
+// ====================================
 // GET /api/admin/users
 // Obtener lista de usuarios (admin)
 // ====================================
