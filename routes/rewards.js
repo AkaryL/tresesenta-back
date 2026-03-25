@@ -57,15 +57,17 @@ router.get('/my-redemptions', authenticateToken, async (req, res) => {
         const user_id = req.user.id;
         const result = await query(
             `SELECT rr.id, rr.discount_code, rr.coins_spent, rr.shopify_price_rule_id,
-                    rr.expires_at, rr.created_at,
-                    r.title, r.description, r.type, r.discount_value, r.image_url
+                    rr.status, rr.redeemed_at, rr.expires_at,
+                    r.title as reward_title, r.description as reward_description,
+                    r.type, r.discount_value, r.image_url
              FROM reward_redemptions rr
              JOIN rewards r ON rr.reward_id = r.id
              WHERE rr.user_id = $1
-             ORDER BY rr.created_at DESC`,
+             ORDER BY rr.redeemed_at DESC`,
             [user_id]
         );
-        res.json({ redemptions: result.rows });
+        const coinsResult = await query('SELECT coins FROM users WHERE id = $1', [user_id]);
+        res.json({ redemptions: result.rows, coins: coinsResult.rows[0]?.coins || 0 });
     } catch (error) {
         console.error('Error al obtener canjes:', error);
         res.status(500).json({ error: 'Error al obtener canjes' });
@@ -128,73 +130,79 @@ router.post('/:id/redeem', authenticateToken, async (req, res) => {
         const expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + (reward.expiry_days || 30));
 
-        // Crear Price Rule en Shopify
-        const priceRuleRes = await fetch(`${SHOPIFY_BASE_URL}/price_rules.json`, {
-            method: 'POST',
-            headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                price_rule: {
-                    title: discountCode,
-                    target_type: reward.type === 'free_shipping' ? 'shipping_line' : 'line_item',
-                    target_selection: 'all',
-                    allocation_method: 'across',
-                    value_type: reward.type === 'percentage' ? 'percentage' : 'fixed_amount',
-                    value: reward.type === 'free_shipping' ? '-100.0' : `-${reward.discount_value}`,
-                    customer_selection: 'all',
-                    usage_limit: 1,
-                    starts_at: new Date().toISOString(),
-                    ends_at: expiryDate.toISOString(),
-                }
-            })
-        });
+        // Intentar crear Price Rule en Shopify
+        let priceRuleId = null;
+        let shopifyDiscountId = null;
+        try {
+            const priceRuleRes = await fetch(`${SHOPIFY_BASE_URL}/price_rules.json`, {
+                method: 'POST',
+                headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    price_rule: {
+                        title: discountCode,
+                        target_type: reward.type === 'free_shipping' ? 'shipping_line' : 'line_item',
+                        target_selection: 'all',
+                        allocation_method: 'across',
+                        value_type: reward.type === 'percentage' ? 'percentage' : 'fixed_amount',
+                        value: reward.type === 'free_shipping' ? '-100.0' : `-${reward.discount_value}`,
+                        customer_selection: 'all',
+                        usage_limit: 1,
+                        starts_at: new Date().toISOString(),
+                        ends_at: expiryDate.toISOString(),
+                    }
+                })
+            });
 
-        if (!priceRuleRes.ok) {
-            const errorText = await priceRuleRes.text();
-            console.error('[SHOPIFY] Error creando price rule:', errorText);
-            return res.status(500).json({ error: 'Error al crear código de descuento en Shopify' });
-        }
-
-        const priceRuleData = await priceRuleRes.json();
-        const priceRuleId = priceRuleData.price_rule.id;
+            if (priceRuleRes.ok) {
+                const priceRuleData = await priceRuleRes.json();
+                priceRuleId = priceRuleData.price_rule.id;
 
         // Crear Discount Code para ese Price Rule
-        const discountRes = await fetch(`${SHOPIFY_BASE_URL}/price_rules/${priceRuleId}/discount_codes.json`, {
-            method: 'POST',
-            headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ discount_code: { code: discountCode } })
-        });
-
-        if (!discountRes.ok) {
-            const errorText = await discountRes.text();
-            console.error('[SHOPIFY] Error creando discount code:', errorText);
-            return res.status(500).json({ error: 'Error al crear código de descuento en Shopify' });
+                // Crear discount code
+                const discountRes = await fetch(`${SHOPIFY_BASE_URL}/price_rules/${priceRuleId}/discount_codes.json`, {
+                    method: 'POST',
+                    headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ discount_code: { code: discountCode } })
+                });
+                if (discountRes.ok) {
+                    const discountData = await discountRes.json();
+                    shopifyDiscountId = discountData.discount_code?.id;
+                }
+            } else {
+                console.warn('[SHOPIFY] No se pudo crear price rule, guardando código sin Shopify');
+            }
+        } catch (shopifyErr) {
+            console.warn('[SHOPIFY] Error (continuando sin Shopify):', shopifyErr.message);
         }
 
         // Deducir monedas e insertar canje en la base de datos
         const redemption = await transaction(async (client) => {
-            // Deducir monedas
             await client.query(
                 'UPDATE users SET coins = coins - $1 WHERE id = $2',
                 [reward.coin_cost, user_id]
             );
 
-            // Insertar canje
             const insertResult = await client.query(
                 `INSERT INTO reward_redemptions
-                    (user_id, reward_id, discount_code, coins_spent, shopify_price_rule_id, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)
+                    (user_id, reward_id, discount_code, coins_spent, shopify_price_rule_id, shopify_discount_id, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                  RETURNING *`,
-                [user_id, reward_id, discountCode, reward.coin_cost, priceRuleId.toString(), expiryDate]
+                [user_id, reward_id, discountCode, reward.coin_cost, priceRuleId, shopifyDiscountId, expiryDate]
             );
 
             return insertResult.rows[0];
         });
+
+        // Get remaining coins
+        const coinsResult = await query('SELECT coins FROM users WHERE id = $1', [user_id]);
 
         res.status(201).json({
             message: '¡Recompensa canjeada exitosamente!',
             discount_code: discountCode,
             expires_at: expiryDate.toISOString(),
             coins_spent: reward.coin_cost,
+            coins_remaining: coinsResult.rows[0]?.coins || 0,
+            shopify_synced: !!priceRuleId,
             redemption
         });
 
