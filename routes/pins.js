@@ -606,11 +606,11 @@ router.post('/:id/comments',
                 );
 
                 // Puntos para quien comenta
-                const commentResult = await client.query(
+                const commentPtsResult = await client.query(
                     `SELECT record_point_transaction($1, 'comment_pin', $2, NULL, false, 'Comentaste en un pin') as points`,
                     [user_id, id]
                 );
-                const commentPoints = commentResult.rows[0]?.points || 0;
+                const commentPoints = commentPtsResult.rows[0]?.points || 0;
                 if (commentPoints > 0) {
                     await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [commentPoints, user_id]);
                 }
