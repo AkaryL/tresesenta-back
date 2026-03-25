@@ -98,6 +98,7 @@ app.use('/api/upload', require('./routes/upload'));
 app.use('/api/points', require('./routes/points'));
 app.use('/api/verification', require('./routes/verification'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/rewards', require('./routes/rewards'));
 
 // 404 handler
 app.use((req, res) => {

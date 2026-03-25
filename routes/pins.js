@@ -305,10 +305,14 @@ router.post('/',
 
                 // Solo registrar puntos si fue auto-aprobado
                 if (verification_status === 'approved') {
-                    await client.query(
-                        `SELECT record_point_transaction($1, $2, $3, NULL, $4, $5)`,
+                    const ptResult = await client.query(
+                        `SELECT record_point_transaction($1, $2, $3, NULL, $4, $5) as points`,
                         [user_id, action_code, pin.id, true, `Pin creado: ${title}`]
                     );
+                    const ptPoints = ptResult.rows[0]?.points || 0;
+                    if (ptPoints > 0) {
+                        await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [ptPoints, user_id]);
+                    }
                 }
 
                 // Incrementar estadísticas diarias siempre
@@ -418,17 +422,25 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
             );
 
             // Puntos para quien da like
-            await client.query(
-                `SELECT record_point_transaction($1, 'like_pin', $2, NULL, false, 'Diste like')`,
+            const likeResult = await client.query(
+                `SELECT record_point_transaction($1, 'like_pin', $2, NULL, false, 'Diste like') as points`,
                 [user_id, id]
             );
+            const likePoints = likeResult.rows[0]?.points || 0;
+            if (likePoints > 0) {
+                await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [likePoints, user_id]);
+            }
 
             // Puntos para quien recibe like (si no es el mismo usuario)
             if (pinOwner.rows[0] && pinOwner.rows[0].user_id !== user_id) {
-                await client.query(
-                    `SELECT record_point_transaction($1, 'receive_like', $2, $3, false, 'Recibiste un like')`,
+                const recvLikeResult = await client.query(
+                    `SELECT record_point_transaction($1, 'receive_like', $2, $3, false, 'Recibiste un like') as points`,
                     [pinOwner.rows[0].user_id, id, user_id]
                 );
+                const recvLikePoints = recvLikeResult.rows[0]?.points || 0;
+                if (recvLikePoints > 0) {
+                    await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [recvLikePoints, pinOwner.rows[0].user_id]);
+                }
             }
 
             // Incrementar estadísticas diarias
@@ -594,17 +606,25 @@ router.post('/:id/comments',
                 );
 
                 // Puntos para quien comenta
-                await client.query(
-                    `SELECT record_point_transaction($1, 'comment_pin', $2, NULL, false, 'Comentaste en un pin')`,
+                const commentResult = await client.query(
+                    `SELECT record_point_transaction($1, 'comment_pin', $2, NULL, false, 'Comentaste en un pin') as points`,
                     [user_id, id]
                 );
+                const commentPoints = commentResult.rows[0]?.points || 0;
+                if (commentPoints > 0) {
+                    await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [commentPoints, user_id]);
+                }
 
                 // Puntos para quien recibe comentario (si no es el mismo usuario)
                 if (pinOwner.rows[0] && pinOwner.rows[0].user_id !== user_id) {
-                    await client.query(
-                        `SELECT record_point_transaction($1, 'receive_comment', $2, $3, false, 'Recibiste un comentario')`,
+                    const recvCommentResult = await client.query(
+                        `SELECT record_point_transaction($1, 'receive_comment', $2, $3, false, 'Recibiste un comentario') as points`,
                         [pinOwner.rows[0].user_id, id, user_id]
                     );
+                    const recvCommentPoints = recvCommentResult.rows[0]?.points || 0;
+                    if (recvCommentPoints > 0) {
+                        await client.query('UPDATE users SET coins = coins + $1 WHERE id = $2', [recvCommentPoints, pinOwner.rows[0].user_id]);
+                    }
                 }
 
                 // Incrementar estadísticas diarias

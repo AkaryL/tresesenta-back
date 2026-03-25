@@ -315,24 +315,36 @@ router.post('/daily-login', authenticateToken, async (req, res) => {
         );
 
         // Dar puntos de login diario
-        await query(
-            `SELECT record_point_transaction($1, 'daily_login', NULL, NULL, false, 'Login diario')`,
+        const loginPointsResult = await query(
+            `SELECT record_point_transaction($1, 'daily_login', NULL, NULL, false, 'Login diario') as points`,
             [user_id]
         );
+        const loginPoints = loginPointsResult.rows[0]?.points || 0;
+        if (loginPoints > 0) {
+            await query('UPDATE users SET coins = coins + $1 WHERE id = $2', [loginPoints, user_id]);
+        }
 
         // Verificar si hay bonus de racha
         let streakBonus = null;
         if (newStreak === 7) {
-            await query(
-                `SELECT record_point_transaction($1, 'streak_7_days', NULL, NULL, false, 'Racha de 7 días')`,
+            const streak7Result = await query(
+                `SELECT record_point_transaction($1, 'streak_7_days', NULL, NULL, false, 'Racha de 7 días') as points`,
                 [user_id]
             );
+            const streak7Points = streak7Result.rows[0]?.points || 0;
+            if (streak7Points > 0) {
+                await query('UPDATE users SET coins = coins + $1 WHERE id = $2', [streak7Points, user_id]);
+            }
             streakBonus = { days: 7, message: '¡7 días seguidos!' };
         } else if (newStreak === 30) {
-            await query(
-                `SELECT record_point_transaction($1, 'streak_30_days', NULL, NULL, false, 'Racha de 30 días')`,
+            const streak30Result = await query(
+                `SELECT record_point_transaction($1, 'streak_30_days', NULL, NULL, false, 'Racha de 30 días') as points`,
                 [user_id]
             );
+            const streak30Points = streak30Result.rows[0]?.points || 0;
+            if (streak30Points > 0) {
+                await query('UPDATE users SET coins = coins + $1 WHERE id = $2', [streak30Points, user_id]);
+            }
             streakBonus = { days: 30, message: '¡30 días seguidos!' };
         }
 

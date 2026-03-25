@@ -237,7 +237,7 @@ router.post('/:id/approve',
                 // Dar puntos bonus al usuario
                 if (vr.bonus_points > 0) {
                     await client.query(
-                        `UPDATE users SET total_points = total_points + $1 WHERE id = $2`,
+                        `UPDATE users SET total_points = total_points + $1, coins = coins + $1 WHERE id = $2`,
                         [vr.bonus_points, vr.pin_owner_id]
                     );
 
