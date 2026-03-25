@@ -268,6 +268,7 @@ router.post('/verify-code',
                     email: normalizedEmail,
                     full_name: user.full_name || `${customer.first_name} ${customer.last_name}`.trim(),
                     total_points: user.total_points || 0,
+                    coins: user.coins || 0,
                     level: user.level || 1,
                     shopify_customer_id: user.shopify_customer_id,
                     is_admin: user.is_admin || false
@@ -295,7 +296,7 @@ router.get('/me', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         const result = await query(
-            `SELECT id, username, email, full_name, total_points, level, avatar_url, ranking_position, shopify_customer_id, is_admin, created_at
+            `SELECT id, username, email, full_name, total_points, coins, level, avatar_url, ranking_position, shopify_customer_id, is_admin, created_at
              FROM users WHERE id = $1`,
             [decoded.id]
         );
