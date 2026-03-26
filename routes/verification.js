@@ -88,7 +88,7 @@ router.get('/pending', authenticateToken, requireAdmin, async (req, res) => {
         const result = await query(
             `SELECT vr.id, vr.status, vr.bonus_points, vr.created_at,
                     vr.verification_images,
-                    p.id as pin_id, p.title as pin_title, p.image_urls as pin_images,
+                    p.id as pin_id, p.title as pin_title, p.image_urls as pin_images, p.video_url,
                     p.description as pin_description,
                     p.location_name, p.latitude, p.longitude,
                     p.used_tresesenta, p.shoe_model,

@@ -926,6 +926,7 @@ router.get('/historial', authenticateToken, requireAdmin, async (req, res) => {
                 p.latitude,
                 p.longitude,
                 p.image_urls  AS pin_images,
+                p.video_url,
                 p.shoe_model,
                 p.used_tresesenta,
                 p.points_awarded,
