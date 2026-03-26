@@ -9,8 +9,8 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configurar storage de Cloudinary
-const storage = new CloudinaryStorage({
+// Storage para imágenes
+const imageStorage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'tresesenta-mapa360',
@@ -19,49 +19,58 @@ const storage = new CloudinaryStorage({
     }
 });
 
-// Configurar multer
-const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 // 5MB default
-    },
-    fileFilter: (req, file, cb) => {
-        const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        if (allowedMimes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Tipo de archivo no permitido. Solo imágenes JPG, PNG, GIF, WEBP'));
-        }
+// Storage para videos
+const videoStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'tresesenta-mapa360/videos',
+        resource_type: 'video',
+        allowed_formats: ['mp4', 'mov', 'webm'],
+        transformation: [{ width: 720, crop: 'limit' }]
     }
 });
 
-// Middleware para upload de múltiples imágenes
-const uploadImages = upload.array('images', parseInt(process.env.MAX_FILES_PER_PIN) || 5);
+// Multer para imágenes
+const imageUpload = multer({
+    storage: imageStorage,
+    limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new Error('Solo imágenes JPG, PNG, GIF, WEBP'));
+    }
+});
 
-// Middleware de manejo de errores
+// Multer para videos
+const videoUpload = multer({
+    storage: videoStorage,
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+    fileFilter: (req, file, cb) => {
+        const allowed = ['video/mp4', 'video/quicktime', 'video/webm'];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new Error('Solo videos MP4, MOV, WEBM'));
+    }
+});
+
+const uploadImages = imageUpload.array('images', parseInt(process.env.MAX_FILES_PER_PIN) || 5);
+const uploadVideo = videoUpload.single('video');
+
 const handleUploadError = (err, req, res, next) => {
     if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({
-                error: 'Archivo demasiado grande. Máximo 5MB por imagen'
-            });
+            return res.status(400).json({ error: 'Archivo demasiado grande' });
         }
         if (err.code === 'LIMIT_FILE_COUNT') {
-            return res.status(400).json({
-                error: `Máximo ${process.env.MAX_FILES_PER_PIN || 5} imágenes permitidas`
-            });
+            return res.status(400).json({ error: 'Demasiados archivos' });
         }
     }
-    if (err) {
-        return res.status(400).json({
-            error: err.message || 'Error al subir imagen'
-        });
-    }
+    if (err) return res.status(400).json({ error: err.message || 'Error al subir archivo' });
     next();
 };
 
 module.exports = {
     cloudinary,
     uploadImages,
+    uploadVideo,
     handleUploadError
 };
