@@ -116,7 +116,7 @@ router.get('/:id', async (req, res) => {
         // Obtener pins de la ruta
         const pinsResult = await query(
             `SELECT p.id, p.title, p.description, p.location_name, p.latitude,
-                    p.longitude, p.image_urls, p.likes_count, rp.order_index, rp.is_required,
+                    p.longitude, p.image_urls, p.video_url, p.likes_count, rp.order_index, rp.is_required,
                     c.emoji as category_emoji, c.color as category_color
              FROM route_pins rp
              JOIN pins p ON rp.pin_id = p.id
@@ -187,7 +187,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.get('/my/pins', authenticateToken, async (req, res) => {
     try {
         const result = await query(
-            `SELECT p.id, p.title, p.location_name, p.latitude, p.longitude, p.image_urls,
+            `SELECT p.id, p.title, p.location_name, p.latitude, p.longitude, p.image_urls, p.video_url,
                     c.emoji as category_emoji, c.color as category_color
              FROM pins p
              LEFT JOIN categories c ON p.category_id = c.id

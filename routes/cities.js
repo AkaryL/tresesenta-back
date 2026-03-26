@@ -74,7 +74,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
         // Obtener pins destacados de la ciudad
         const pinsResult = await query(
-            `SELECT p.id, p.title, p.image_urls, p.likes_count, u.username
+            `SELECT p.id, p.title, p.image_urls, p.video_url, p.likes_count, u.username
              FROM pins p
              JOIN users u ON p.user_id = u.id
              WHERE p.city_id = $1

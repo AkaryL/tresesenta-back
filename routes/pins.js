@@ -113,7 +113,7 @@ router.get('/mine', authenticateToken, async (req, res) => {
         const result = await query(`
             SELECT
                 p.id, p.title, p.description, p.location_name,
-                p.latitude, p.longitude, p.image_urls,
+                p.latitude, p.longitude, p.image_urls, p.video_url,
                 p.likes_count, p.comments_count,
                 p.created_at, p.verification_status, p.google_place_id,
                 c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color,

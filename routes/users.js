@@ -193,7 +193,7 @@ router.get('/:username', async (req, res) => {
 
         // Obtener pins recientes
         const pinsResult = await query(
-            `SELECT p.id, p.title, p.image_urls, p.likes_count, p.created_at, c.emoji
+            `SELECT p.id, p.title, p.image_urls, p.video_url, p.likes_count, p.created_at, c.emoji
              FROM pins p
              LEFT JOIN categories c ON p.category_id = c.id
              WHERE p.user_id = $1

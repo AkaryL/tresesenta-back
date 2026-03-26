@@ -394,7 +394,7 @@ router.get('/my-requests', authenticateToken, async (req, res) => {
         const result = await query(
             `SELECT vr.id, vr.status, vr.bonus_points, vr.created_at,
                     vr.reviewed_at, vr.rejection_reason,
-                    p.id as pin_id, p.title as pin_title, p.image_urls
+                    p.id as pin_id, p.title as pin_title, p.image_urls, p.video_url
              FROM verification_requests vr
              JOIN pins p ON vr.pin_id = p.id
              WHERE vr.user_id = $1
