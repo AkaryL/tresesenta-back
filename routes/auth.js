@@ -228,8 +228,10 @@ router.post('/verify-code',
             let user;
 
             if (userResult.rows.length === 0) {
-                // Crear usuario nuevo
-                const username = normalizedEmail.split('@')[0] + '_' + Date.now().toString().slice(-4);
+                // Crear usuario nuevo - usar nombre de Shopify + números aleatorios
+                const firstName = (customer.first_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                const randomNum = Math.floor(1000 + Math.random() * 9000);
+                const username = firstName ? `${firstName}_${randomNum}` : normalizedEmail.split('@')[0] + '_' + randomNum;
                 const insertResult = await query(
                     `INSERT INTO users (username, email, password_hash, full_name, shopify_customer_id)
                      VALUES ($1, $2, $3, $4, $5)
