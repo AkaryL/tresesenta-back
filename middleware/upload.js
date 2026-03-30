@@ -26,7 +26,7 @@ const videoStorage = new CloudinaryStorage({
         folder: 'tresesenta-mapa360/videos',
         resource_type: 'video',
         allowed_formats: ['mp4', 'mov', 'webm'],
-        transformation: [{ width: 720, crop: 'limit' }]
+        transformation: [{ width: 1080, crop: 'limit', quality: 'auto' }]
     }
 });
 
@@ -44,7 +44,7 @@ const imageUpload = multer({
 // Multer para videos
 const videoUpload = multer({
     storage: videoStorage,
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
     fileFilter: (req, file, cb) => {
         const allowed = ['video/mp4', 'video/quicktime', 'video/webm'];
         if (allowed.includes(file.mimetype)) cb(null, true);
