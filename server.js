@@ -99,6 +99,7 @@ app.use('/api/points', require('./routes/points'));
 app.use('/api/verification', require('./routes/verification'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/rewards', require('./routes/rewards'));
+app.use('/api/og', require('./routes/og'));
 
 // 404 handler
 app.use((req, res) => {
