@@ -33,7 +33,7 @@ function generateOTP() {
 // ====================================
 router.post('/request-code',
     otpRateLimiter,
-    [body('email').isEmail().normalizeEmail().withMessage('Email inválido')],
+    [body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }).withMessage('Email inválido')],
     async (req, res) => {
         try {
             const errors = validationResult(req);
@@ -46,8 +46,14 @@ router.post('/request-code',
 
             console.log(`[AUTH] Solicitando código para: ${normalizedEmail}`);
 
-            // Buscar en Shopify
-            const customer = await shopify.findCustomerByEmail(normalizedEmail);
+            // Buscar en Shopify (intentar con y sin puntos)
+            let customer = await shopify.findCustomerByEmail(normalizedEmail);
+            if (!customer && normalizedEmail.includes('@gmail.com')) {
+                const withoutDots = normalizedEmail.replace(/\.(?=.*@gmail\.com)/g, '');
+                if (withoutDots !== normalizedEmail) {
+                    customer = await shopify.findCustomerByEmail(withoutDots);
+                }
+            }
 
             if (!customer) {
                 console.log(`[AUTH] Email no encontrado en Shopify: ${normalizedEmail}`);
@@ -95,7 +101,7 @@ router.post('/request-code',
 router.post('/register-and-send-code',
     otpRateLimiter,
     [
-        body('email').isEmail().normalizeEmail().withMessage('Email inválido'),
+        body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }).withMessage('Email inválido'),
         body('first_name').optional().trim().isLength({ max: 100 }),
         body('last_name').optional().trim().isLength({ max: 100 })
     ],
@@ -159,7 +165,7 @@ router.post('/register-and-send-code',
 // ====================================
 router.post('/verify-code',
     [
-        body('email').isEmail().normalizeEmail().withMessage('Email inválido'),
+        body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }).withMessage('Email inválido'),
         body('code').isLength({ min: 6, max: 6 }).isNumeric().withMessage('Código inválido')
     ],
     async (req, res) => {
@@ -388,7 +394,7 @@ router.get('/my-orders', async (req, res) => {
 router.post('/register',
     [
         body('username').trim().isLength({ min: 3, max: 50 }),
-        body('email').isEmail().normalizeEmail(),
+        body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
         body('password').isLength({ min: 6 }),
         body('full_name').optional().trim().isLength({ max: 100 })
     ],
@@ -453,7 +459,7 @@ router.post('/register',
 // ====================================
 router.post('/login',
     [
-        body('email').isEmail().normalizeEmail(),
+        body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
         body('password').notEmpty()
     ],
     async (req, res) => {
