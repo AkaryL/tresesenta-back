@@ -8,10 +8,10 @@ const shopify = require('../services/shopify');
 
 const router = express.Router();
 
-// Rate limiter para OTP (3 solicitudes por 10 minutos por email)
+// Rate limiter para OTP (10 solicitudes por 10 minutos por email)
 const otpRateLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
-    max: 5,
+    max: 10,
     keyGenerator: (req) => {
         const email = req.body.email ? req.body.email.toLowerCase().trim() : 'unknown';
         return `${email}_${req.ip}`;
