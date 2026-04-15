@@ -26,7 +26,7 @@ router.get('/', optionalAuth, async (req, res) => {
                 p.id, p.title, p.description, p.location_name,
                 p.latitude, p.longitude, p.image_urls, p.video_url,
                 p.likes_count, p.comments_count, p.shares_count,
-                p.is_featured, p.created_at,
+                p.is_featured, p.created_at, p.category_id,
                 p.used_tresesenta, p.verification_status, p.google_place_id,
                 u.id as user_id, u.username, u.avatar_url, u.is_verified_buyer,
                 c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color, c.icon_url as category_icon_url,
@@ -370,6 +370,149 @@ router.post('/',
         }
     }
 );
+
+// ====================================
+// PUT /api/pins/:id
+// Editar un pin propio (título, descripción, categoría)
+// ====================================
+router.put('/:id',
+    authenticateToken,
+    [
+        body('title').optional().trim().notEmpty().withMessage('Título no puede estar vacío'),
+        body('description').optional().trim(),
+        body('category_id').optional().isInt().withMessage('Categoría inválida')
+    ],
+    async (req, res) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({ errors: errors.array() });
+            }
+
+            const { id } = req.params;
+            const user_id = req.user.id;
+
+            // Verificar que el pin existe y pertenece al usuario
+            const pinCheck = await query(
+                'SELECT user_id FROM pins WHERE id = $1',
+                [id]
+            );
+
+            if (pinCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'Pin no encontrado' });
+            }
+
+            if (pinCheck.rows[0].user_id !== user_id) {
+                return res.status(403).json({ error: 'No tienes permiso para editar este pin' });
+            }
+
+            const { title, description, category_id } = req.body;
+
+            // Construir query dinámico solo con campos enviados
+            const updates = [];
+            const values = [];
+            let paramIndex = 1;
+
+            if (title !== undefined) {
+                updates.push(`title = $${paramIndex}`);
+                values.push(title);
+                paramIndex++;
+            }
+            if (description !== undefined) {
+                updates.push(`description = $${paramIndex}`);
+                values.push(description);
+                paramIndex++;
+            }
+            if (category_id !== undefined) {
+                updates.push(`category_id = $${paramIndex}`);
+                values.push(category_id);
+                paramIndex++;
+            }
+
+            if (updates.length === 0) {
+                return res.status(400).json({ error: 'No se enviaron campos para actualizar' });
+            }
+
+            updates.push(`updated_at = CURRENT_TIMESTAMP`);
+            values.push(id);
+
+            const result = await query(
+                `UPDATE pins SET ${updates.join(', ')} WHERE id = $${paramIndex}
+                 RETURNING *`,
+                values
+            );
+
+            // Obtener pin completo con joins para retornar
+            const fullPin = await query(
+                `SELECT
+                    p.*,
+                    u.id as user_id, u.username, u.avatar_url,
+                    c.name as category_name, c.name_es as category_name_es, c.emoji as category_emoji, c.color as category_color, c.icon_url as category_icon_url,
+                    ci.name as city_name
+                FROM pins p
+                LEFT JOIN users u ON p.user_id = u.id
+                LEFT JOIN categories c ON p.category_id = c.id
+                LEFT JOIN cities ci ON p.city_id = ci.id
+                WHERE p.id = $1`,
+                [id]
+            );
+
+            const updatedPin = fullPin.rows[0];
+
+            // WebSocket: notificar a todos que el pin se actualizó
+            const io = req.app.locals.io;
+            if (io) {
+                io.emit('pin:updated', updatedPin);
+            }
+
+            res.json({ message: 'Pin actualizado', pin: updatedPin });
+
+        } catch (error) {
+            console.error('Error al editar pin:', error);
+            res.status(500).json({ error: 'Error al editar pin' });
+        }
+    }
+);
+
+// ====================================
+// DELETE /api/pins/:id
+// Eliminar un pin propio
+// ====================================
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user_id = req.user.id;
+
+        // Verificar que el pin existe y pertenece al usuario
+        const pinCheck = await query(
+            'SELECT user_id FROM pins WHERE id = $1',
+            [id]
+        );
+
+        if (pinCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Pin no encontrado' });
+        }
+
+        if (pinCheck.rows[0].user_id !== user_id) {
+            return res.status(403).json({ error: 'No tienes permiso para eliminar este pin' });
+        }
+
+        // Eliminar pin (cascade borra likes, comments, verification_requests)
+        await query('DELETE FROM pins WHERE id = $1', [id]);
+
+        // WebSocket: notificar que el pin fue removido
+        const io = req.app.locals.io;
+        if (io) {
+            io.emit('pin:removed', { pin_id: parseInt(id) });
+        }
+
+        res.json({ message: 'Pin eliminado' });
+
+    } catch (error) {
+        console.error('Error al eliminar pin:', error);
+        res.status(500).json({ error: 'Error al eliminar pin' });
+    }
+});
 
 // ====================================
 // POST /api/pins/:id/like
