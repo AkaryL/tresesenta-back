@@ -236,7 +236,7 @@ router.post('/verify-code',
             if (userResult.rows.length === 0) {
                 // Crear usuario nuevo - usar nombre completo de Shopify
                 const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
-                let username = fullName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '');
+                let username = fullName.replace(/[^a-zA-ZÀ-ÿ0-9 ]/g, '').replace(/\s+/g, '');
                 if (!username) username = normalizedEmail.split('@')[0];
                 // Si ya existe, agregar números
                 const existing = await query('SELECT id FROM users WHERE username = $1', [username]);
